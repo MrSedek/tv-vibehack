@@ -2,10 +2,12 @@ package com.gathin.tvhome;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Outline;
-import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -30,111 +32,94 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * Adapter for the "Continue Watching" shelf.
- */
+/** Cards of the continue-watching shelf. */
 public class WatchNextAdapter extends RecyclerView.Adapter<WatchNextAdapter.Holder> {
 
-    public interface OnItemClickListener {
+    interface Listener {
         void onItemClick(WatchNextManager.WatchItem item);
+
+        void onItemLongClick(WatchNextManager.WatchItem item, View card);
+
+        void onItemFocused(View card);
     }
 
-    public interface OnItemLongClickListener {
-        void onItemLongClick(WatchNextManager.WatchItem item, View card);
-    }
+    static final float FOCUS_SCALE = 1.08f;
 
     private final Context ctx;
     private final List<WatchNextManager.WatchItem> items = new ArrayList<>();
-    private final OnItemClickListener listener;
-    private OnItemLongClickListener longClickListener;
-    private final float density;
+    private Listener listener;
 
     // Thumbnails are small JPEGs from the bridge; decode off the main thread and keep the shelf's worth.
     private final LruCache<Uri, Bitmap> thumbs = new LruCache<>(24);
+    /** App banners for cards without artwork (VK reports none), by package. */
+    private final LruCache<String, Drawable> banners = new LruCache<>(16);
     private final ExecutorService decoder = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
 
-    public WatchNextAdapter(Context ctx, OnItemClickListener listener) {
+    WatchNextAdapter(Context ctx) {
         this.ctx = ctx;
-        this.listener = listener;
-        this.density = ctx.getResources().getDisplayMetrics().density;
         reload();
     }
 
-    public void reload() {
+    void setListener(Listener l) {
+        listener = l;
+    }
+
+    void reload() {
         items.clear();
         items.addAll(WatchNextManager.getItems(ctx));
         notifyDataSetChanged();
-    }
-
-    /** Position among the VibeBridge items, which follow the bridge's. */
-    int localIndexOf(WatchNextManager.WatchItem item) {
-        int local = 0;
-        for (WatchNextManager.WatchItem it : items) {
-            if (it == item) return local;
-            if (!it.fromBridge()) local++;
-        }
-        return -1;
-    }
-
-    public void setOnItemLongClickListener(OnItemLongClickListener l) {
-        longClickListener = l;
-    }
-
-    public void addItem(WatchNextManager.WatchItem item) {
-        items.add(0, item);
-        notifyItemInserted(0);
     }
 
     @NonNull
     @Override
     public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_watch_next, parent, false);
-        return new Holder(v);
+        return new Holder(v, listener);
     }
 
     @Override
     public void onBindViewHolder(@NonNull Holder h, int position) {
         WatchNextManager.WatchItem it = items.get(position);
         // VK reports no title, only where you stopped.
-        h.title.setText(!it.title.isEmpty() ? it.title
-                : ctx.getString(R.string.resume_from, formatTime(it.positionMs)));
+        h.title.setText(!it.title.isEmpty() ? it.title : ctx.getString(R.string.resume_from, formatTime(it.positionMs)));
         h.badge.setText(it.source);
-        h.progressBar.setProgress(it.progress);
-        h.progressBar.setVisibility(!it.fromBridge() || it.durationMs > 0 ? View.VISIBLE : View.INVISIBLE);
-        bindThumb(h, it.artUri);
-
-        // Stylish dynamic gradient backdrop
-        int c1 = 0xFF1C1C24;
-        int c2 = 0xFF0E0E12;
-        if (it.source.toLowerCase().contains("tube")) {
-            c1 = 0xFF2A1515;
-        } else if (it.source.toLowerCase().contains("кино")) {
-            c1 = 0xFF281E12;
+        h.progressBar.setProgress(it.progress());
+        h.progressBar.setVisibility(it.durationMs > 0 ? View.VISIBLE : View.INVISIBLE);
+        long leftMin = (it.remainingMs() + 59_999) / 60_000;
+        if (it.durationMs > 0 && leftMin > 0) {
+            h.remaining.setText(ctx.getString(R.string.time_left, formatMinutes(leftMin)));
+            h.remaining.setVisibility(View.VISIBLE);
+        } else {
+            h.remaining.setVisibility(View.GONE);
         }
-        GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{c1, c2});
-        gd.setCornerRadius(16f * density);
-        h.backdrop.setBackground(gd);
-
-        h.card.setOnClickListener(v -> {
-            if (listener != null) {
-                listener.onItemClick(it);
-            } else {
-                launch(it);
-            }
-        });
-        h.card.setOnLongClickListener(v -> {
-            if (longClickListener == null) return false;
-            longClickListener.onItemLongClick(it, v);
-            return true;
-        });
+        bindArt(h, it);
+        h.card.setTag(it);
     }
 
-    private void bindThumb(Holder h, Uri uri) {
+    /** The bridge's thumbnail when there is one, else the app's own banner, dimmed. */
+    private void bindArt(Holder h, WatchNextManager.WatchItem it) {
+        Uri uri = it.artUri;
         h.thumb.setTag(uri);
-        Bitmap cached = uri != null ? thumbs.get(uri) : null;
-        showThumb(h, cached);
-        if (uri == null || cached != null) return;
+        if (uri == null) {
+            Drawable banner = banner(it.pkg);
+            if (banner != null) {
+                h.thumb.setImageDrawable(banner);
+                h.thumb.setImageAlpha(140);
+                showArt(h, true);
+            } else {
+                showArt(h, false);
+            }
+            return;
+        }
+        h.thumb.setImageAlpha(255);
+        Bitmap cached = thumbs.get(uri);
+        if (cached != null) {
+            h.thumb.setImageBitmap(cached);
+            showArt(h, true);
+            return;
+        }
+        showArt(h, false);
         decoder.execute(() -> {
             Bitmap bmp = null;
             try (InputStream in = ctx.getContentResolver().openInputStream(uri)) {
@@ -145,17 +130,40 @@ public class WatchNextAdapter extends RecyclerView.Adapter<WatchNextAdapter.Hold
             Bitmap done = bmp;
             main.post(() -> {
                 thumbs.put(uri, done);
-                if (uri.equals(h.thumb.getTag())) showThumb(h, done);
+                if (uri.equals(h.thumb.getTag())) {
+                    h.thumb.setImageBitmap(done);
+                    h.thumb.setImageAlpha(255);
+                    showArt(h, true);
+                }
             });
         });
     }
 
-    private static void showThumb(Holder h, Bitmap bmp) {
-        h.thumb.setImageBitmap(bmp);
-        int vis = bmp != null ? View.VISIBLE : View.GONE;
-        h.thumb.setVisibility(vis);
-        h.scrim.setVisibility(vis);
-        h.playIcon.setVisibility(bmp != null ? View.GONE : View.VISIBLE);
+    private static void showArt(Holder h, boolean has) {
+        h.thumb.setVisibility(has ? View.VISIBLE : View.GONE);
+        h.scrim.setVisibility(has ? View.VISIBLE : View.GONE);
+        h.playIcon.setVisibility(has ? View.GONE : View.VISIBLE);
+    }
+
+    private Drawable banner(String pkg) {
+        Drawable d = banners.get(pkg);
+        if (d != null) return d;
+        try {
+            PackageManager pm = ctx.getPackageManager();
+            Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
+            ResolveInfo ri = launch != null ? pm.resolveActivity(launch, 0) : null;
+            if (ri != null && ri.activityInfo != null) d = ri.activityInfo.loadBanner(pm);
+            if (d == null) d = pm.getApplicationBanner(pkg);
+        } catch (Exception ignored) {
+        }
+        if (d != null) banners.put(pkg, d);
+        return d;
+    }
+
+    private String formatMinutes(long minutes) {
+        return minutes >= 60
+                ? ctx.getString(R.string.hours_minutes, minutes / 60, minutes % 60)
+                : ctx.getString(R.string.minutes_only, minutes);
     }
 
     private static String formatTime(long ms) {
@@ -164,25 +172,27 @@ public class WatchNextAdapter extends RecyclerView.Adapter<WatchNextAdapter.Hold
                 : String.format(Locale.US, "%d:%02d", s / 60, s % 60);
     }
 
-    public void launch(WatchNextManager.WatchItem it) {
-        if (it.intentUri != null) {
-            try {
-                Intent intent = Intent.parseUri(it.intentUri, Intent.URI_INTENT_SCHEME);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                ctx.startActivity(intent);
-            } catch (Exception e) {
-                Toast.makeText(ctx, "Не открылось: " + it.source, Toast.LENGTH_SHORT).show();
-            }
-        } else if (it.url != null && !it.url.isEmpty()) {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(it.url));
+    /** Picks up where the item left off, through the intent the bridge prepared. */
+    void launch(WatchNextManager.WatchItem it) {
+        try {
+            Intent intent = Intent.parseUri(it.intentUri, Intent.URI_INTENT_SCHEME);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            try {
-                ctx.startActivity(intent);
-            } catch (Exception e) {
-                Toast.makeText(ctx, "Запуск: " + it.title, Toast.LENGTH_SHORT).show();
-            }
-        } else {
-            Toast.makeText(ctx, "Сессия возобновлена: " + it.title, Toast.LENGTH_SHORT).show();
+            ctx.startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(ctx, ctx.getString(R.string.could_not_open, it.source), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** Opens the item's app at its own home screen. */
+    void openApp(WatchNextManager.WatchItem it) {
+        Intent launch = ctx.getPackageManager().getLeanbackLaunchIntentForPackage(it.pkg);
+        if (launch == null) launch = ctx.getPackageManager().getLaunchIntentForPackage(it.pkg);
+        try {
+            if (launch == null) throw new IllegalStateException();
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(launch);
+        } catch (Exception e) {
+            Toast.makeText(ctx, ctx.getString(R.string.could_not_open, it.source), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -193,27 +203,26 @@ public class WatchNextAdapter extends RecyclerView.Adapter<WatchNextAdapter.Hold
 
     static final class Holder extends RecyclerView.ViewHolder {
         final View card;
-        final View backdrop;
         final ImageView thumb;
         final View scrim;
         final View playIcon;
         final TextView badge;
+        final TextView remaining;
         final TextView title;
         final ProgressBar progressBar;
 
-        Holder(View v) {
+        Holder(View v, Listener listener) {
             super(v);
             card = v.findViewById(R.id.card);
-            backdrop = v.findViewById(R.id.backdrop);
             thumb = v.findViewById(R.id.thumb);
             scrim = v.findViewById(R.id.scrim);
             playIcon = v.findViewById(R.id.playIcon);
             badge = v.findViewById(R.id.badge);
+            remaining = v.findViewById(R.id.remaining);
             title = v.findViewById(R.id.title);
             progressBar = v.findViewById(R.id.progressBar);
 
-            final float density = v.getResources().getDisplayMetrics().density;
-            final float radius = density * 16f;
+            final float radius = v.getResources().getDisplayMetrics().density * 16f;
             card.setOutlineProvider(new ViewOutlineProvider() {
                 @Override
                 public void getOutline(View view, Outline outline) {
@@ -222,16 +231,27 @@ public class WatchNextAdapter extends RecyclerView.Adapter<WatchNextAdapter.Hold
             });
             card.setClipToOutline(true);
 
+            card.setOnClickListener(view -> {
+                WatchNextManager.WatchItem it = (WatchNextManager.WatchItem) view.getTag();
+                if (it != null && listener != null) listener.onItemClick(it);
+            });
+            card.setOnLongClickListener(view -> {
+                WatchNextManager.WatchItem it = (WatchNextManager.WatchItem) view.getTag();
+                if (it == null || listener == null) return false;
+                listener.onItemLongClick(it, view);
+                return true;
+            });
             card.setOnFocusChangeListener((view, focused) -> {
                 // Grow right and down, into the gap to the next card and the list's spare height: growing
                 // from the centre, the first card is cut off at the column's edge and the top.
                 view.setPivotX(0f);
                 view.setPivotY(0f);
-                float s = focused ? 1.08f : 1.0f;
+                float s = focused ? FOCUS_SCALE : 1.0f;
                 view.animate().scaleX(s).scaleY(s)
-                        .setDuration(focused ? 240 : 160)
-                        .setInterpolator(new OvershootInterpolator(focused ? 1.5f : 0f))
+                        .setDuration(focused ? 150 : 120)
+                        .setInterpolator(new OvershootInterpolator(focused ? 1.1f : 0f))
                         .start();
+                if (focused && listener != null) listener.onItemFocused(view);
             });
         }
     }

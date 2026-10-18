@@ -5,22 +5,28 @@ import android.content.SharedPreferences;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * Manages user preferences: dock items order and hidden apps.
- * Falls back to res/values/config.xml defaults when not customized by user.
+ * What the user changed from the remote: dock order, hidden apps, grid order, and when each app was
+ * last opened. Falls back to res/values/config.xml where nothing was changed.
  */
 public class AppPreferences {
 
     private static final String PREFS_NAME = "tvhome_prefs";
     private static final String KEY_DOCK_APPS = "dock_apps_v2";
     private static final String KEY_HIDDEN_APPS = "hidden_apps_v2";
+    private static final String KEY_SORT_RECENT = "sort_recent";
+    private static final String KEY_LAUNCHES = "launches";
 
     private final Context ctx;
     private final SharedPreferences prefs;
@@ -43,7 +49,6 @@ public class AppPreferences {
             } catch (JSONException ignored) {
             }
         }
-        // Fallback to config.xml defaults
         String[] defaults = ctx.getResources().getStringArray(R.array.dock_apps);
         return new ArrayList<>(Arrays.asList(defaults));
     }
@@ -60,15 +65,12 @@ public class AppPreferences {
         return getDockApps().contains(pkg);
     }
 
+    /** Adds to the dock; when it is full, the last app gives way. */
     public void pinToDock(String pkg, int maxDock) {
         List<String> list = getDockApps();
         if (list.contains(pkg)) return;
-        if (list.size() >= maxDock) {
-            // Replace the last one or insert at end
-            list.add(pkg);
-        } else {
-            list.add(pkg);
-        }
+        while (list.size() >= maxDock && !list.isEmpty()) list.remove(list.size() - 1);
+        list.add(pkg);
         saveDockApps(list);
     }
 
@@ -104,7 +106,6 @@ public class AppPreferences {
         Set<String> set = getHiddenApps();
         set.add(pkg);
         prefs.edit().putStringSet(KEY_HIDDEN_APPS, set).apply();
-        // Also unpin if docked
         unpinFromDock(pkg);
     }
 
@@ -112,6 +113,37 @@ public class AppPreferences {
         Set<String> set = getHiddenApps();
         set.remove(pkg);
         prefs.edit().putStringSet(KEY_HIDDEN_APPS, set).apply();
+    }
+
+    /** Grid order: most recently opened first, or alphabetical. */
+    public boolean isSortByRecent() {
+        return prefs.getBoolean(KEY_SORT_RECENT, false);
+    }
+
+    public void setSortByRecent(boolean recent) {
+        prefs.edit().putBoolean(KEY_SORT_RECENT, recent).apply();
+    }
+
+    /** When each app was last opened from here (package to epoch millis). */
+    public Map<String, Long> getLaunches() {
+        Map<String, Long> out = new HashMap<>();
+        String json = prefs.getString(KEY_LAUNCHES, null);
+        if (json == null) return out;
+        try {
+            JSONObject o = new JSONObject(json);
+            for (Iterator<String> it = o.keys(); it.hasNext(); ) {
+                String k = it.next();
+                out.put(k, o.optLong(k));
+            }
+        } catch (JSONException ignored) {
+        }
+        return out;
+    }
+
+    public void recordLaunch(String pkg) {
+        Map<String, Long> all = getLaunches();
+        all.put(pkg, System.currentTimeMillis());
+        prefs.edit().putString(KEY_LAUNCHES, new JSONObject(all).toString()).apply();
     }
 
     public void resetToDefaults() {

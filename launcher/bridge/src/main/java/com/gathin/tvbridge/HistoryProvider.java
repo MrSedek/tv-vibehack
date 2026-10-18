@@ -12,6 +12,7 @@ import android.os.ParcelFileDescriptor;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.List;
 
@@ -78,9 +79,19 @@ public class HistoryProvider extends ContentProvider {
         return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
     }
 
-    /** SmartTube reopens the exact video at the saved second; other players just open where they left off. */
+    /**
+     * The intent a source prepared (Jellyfin opens the item's page), else a YouTube link that SmartTube
+     * reopens at the saved second, else the app's own launch intent.
+     */
     private Intent resumeIntent(WatchItem w, List<String> youtube) {
         PackageManager pm = getContext().getPackageManager();
+        if (w.intentUri != null) {
+            try {
+                Intent i = Intent.parseUri(w.intentUri, Intent.URI_INTENT_SCHEME);
+                if (i.resolveActivity(pm) != null) return i;
+            } catch (URISyntaxException ignored) {
+            }
+        }
         if (youtube.contains(w.pkg) && w.mediaId != null && w.mediaId.matches("[A-Za-z0-9_-]{6,20}")) {
             String url = "https://www.youtube.com/watch?v=" + w.mediaId;
             if (w.positionMs >= 1000) url += "&t=" + (w.positionMs / 1000) + "s";

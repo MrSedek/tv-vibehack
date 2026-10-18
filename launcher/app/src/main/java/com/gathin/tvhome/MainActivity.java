@@ -1,7 +1,6 @@
 package com.gathin.tvhome;
 
 import android.app.Activity;
-import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -31,6 +30,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AnimationUtils;
+import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LayoutAnimationController;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -54,21 +54,23 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Modern TV Home for Xiaomi Stick 4K:
- * - VisionOS/tvOS glass aesthetic with spring physics
- * - Continue Watching (Watch Next) shelf synced with media sessions
- * - VibeBridge Web-to-TV integration (port 8989)
- * - Category filter tabs (All, Media, Tools)
- * - Built-in RAM monitor and 1-click cleaner for 2GB stick
- * - Interactive D-pad Remote settings and context menu
+ * tvOS style home: black, a pinned dock row, the app grid below it, a continue-watching shelf above
+ * it, and one glass highlight that springs to whatever has focus.
  */
 public class MainActivity extends Activity implements AppAdapter.TileListener {
 
-    static int COLUMNS = 4;
+    static final String UI_PREFS = "tvhome_ui";
+    /** Colour of the last focused dock app; the screensaver glows with it. */
+    static final String PREF_AMBIENT = "ambient";
+    private static final String PREF_SHOW_SHELF = "show_watch_next";
     private static final long MINUTE_MS = 60_000L;
+
+    private int columns = 4;
     private String liveTvPkg;
+    private float density;
 
     private AppAdapter adapter;
+    private GridLayoutManager layout;
     private RecyclerView grid;
     private FrameLayout root;
     private GlassView glass;
@@ -79,9 +81,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean heroShown;
     private TextView greeting;
     private TextView btnWifi;
+    private String wifiText = "";
     private SpringAnimation springX, springY;
     private float glassTargetX, glassTargetY;
     private boolean glassShown;
+    /** The glass sits on a shelf card, not a grid tile; scrolling of the other list must not move it. */
+    private boolean glassOnShelf;
     private int lastFocused = 0;
     /** Last dock tile in focus; Back and Home return there. */
     private int lastDockFocused = 0;
@@ -103,21 +108,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         }
     };
-    private float density;
 
-    // Continue Watching shelf
+    // Continue watching shelf
     private View layoutWatchNext;
     private RecyclerView listWatchNext;
     private WatchNextAdapter watchNextAdapter;
     private boolean showWatchNext = true;
     private ContentObserver bridgeObserver;
     private SharedPreferences uiPrefs;
-
-    // Category Tabs
-    private TextView tabAll, tabMedia, tabTools;
-
-    // Web-to-TV Bridge
-    private VibeBridgeServer bridgeServer;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable minuteTick = new Runnable() {
@@ -134,7 +132,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         density = getResources().getDisplayMetrics().density;
-        COLUMNS = Math.max(1, getResources().getInteger(R.integer.columns));
+        columns = Math.max(1, getResources().getInteger(R.integer.columns));
         liveTvPkg = getString(R.string.live_tv_package).trim();
 
         root = findViewById(R.id.root);
@@ -149,16 +147,40 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 ambientGlow.setGradientRadius((r - l) * 0.62f));
         greeting = findViewById(R.id.greeting);
         btnWifi = findViewById(R.id.btnWifi);
-        uiPrefs = getSharedPreferences("tvhome_ui", MODE_PRIVATE);
-        showWatchNext = uiPrefs.getBoolean("show_watch_next", true);
+        uiPrefs = getSharedPreferences(UI_PREFS, MODE_PRIVATE);
+        showWatchNext = uiPrefs.getBoolean(PREF_SHOW_SHELF, true);
 
-        // Continue Watching shelf setup
+        // Continue watching shelf
         layoutWatchNext = findViewById(R.id.layoutWatchNext);
         listWatchNext = findViewById(R.id.listWatchNext);
         listWatchNext.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
-        watchNextAdapter = new WatchNextAdapter(this, item -> watchNextAdapter.launch(item));
-        watchNextAdapter.setOnItemLongClickListener(this::showShelfItemMenu);
+        watchNextAdapter = new WatchNextAdapter(this);
+        watchNextAdapter.setListener(new WatchNextAdapter.Listener() {
+            @Override
+            public void onItemClick(WatchNextManager.WatchItem item) {
+                watchNextAdapter.launch(item);
+            }
+
+            @Override
+            public void onItemLongClick(WatchNextManager.WatchItem item, View card) {
+                showShelfItemMenu(item, card);
+            }
+
+            @Override
+            public void onItemFocused(View card) {
+                onShelfCardFocused(card);
+            }
+        });
         listWatchNext.setAdapter(watchNextAdapter);
+        listWatchNext.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView rv, int dx, int dy) {
+                if (!glassShown || !glassOnShelf) return;
+                glassTargetX -= dx;
+                if (springX.isRunning()) springX.animateToFinalPosition(glassTargetX);
+                else glass.setTranslationX(glassTargetX);
+            }
+        });
         bridgeObserver = new ContentObserver(handler) {
             @Override
             public void onChange(boolean selfChange) {
@@ -166,24 +188,22 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         };
 
-        // Start VibeBridge local server (port 8989)
-        bridgeServer = new VibeBridgeServer(this, item -> {
-            if (watchNextAdapter != null) {
-                watchNextAdapter.addItem(item);
-                updateShelfVisibility();
+        // App grid: dock row first, in spans so the dock and the grid can differ in width.
+        grid = findViewById(R.id.grid);
+        adapter = new AppAdapter(this, this, columns);
+        layout = new GridLayoutManager(this, adapter.math().spanCount());
+        layout.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override
+            public int getSpanSize(int position) {
+                return adapter.math().spanSize(position);
             }
         });
-        bridgeServer.start();
-
-        // Main App Grid setup
-        grid = findViewById(R.id.grid);
-        grid.setLayoutManager(new GridLayoutManager(this, COLUMNS));
+        grid.setLayoutManager(layout);
         grid.setHasFixedSize(true);
         grid.setItemAnimator(null);
-        grid.addItemDecoration(new DockDecoration(COLUMNS, density));
+        grid.addItemDecoration(new DockDecoration(adapter, density));
         grid.setLayoutAnimation(new LayoutAnimationController(
                 AnimationUtils.loadAnimation(this, R.anim.tile_enter), 0.06f));
-        adapter = new AppAdapter(this, this, COLUMNS);
         grid.setAdapter(adapter);
 
         // Reread the app list only when a package comes or goes, not on every Home press.
@@ -195,24 +215,20 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         packages.addDataScheme("package");
         registerReceiver(packageReceiver, packages);
 
-        // Layout adjustment for dock shelf
+        // tvOS layout: the dock row sits at the bottom of the screen; the grid hides below until you press Down.
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-            int h = b - t;
-            int dockRow = (int) ((145 + 6 + 12) * density);
-            int want = Math.max(0, h - dockRow - (int) (20 * density));
-            if (grid.getPaddingTop() != want) {
-                grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
-            }
+            updateGridPadding();
             grid.post(this::positionShelf);
         });
         layoutWatchNext.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             if (b - t != ob - ot) positionShelf();
         });
 
+        // Keep the glass glued to its tile while the grid scrolls.
         grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView rv, int dx, int dy) {
-                if (!glassShown) return;
+                if (!glassShown || glassOnShelf) return;
                 glassTargetY -= dy;
                 if (springY.isRunning()) springY.animateToFinalPosition(glassTargetY);
                 else glass.setTranslationY(glassTargetY);
@@ -226,52 +242,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             s.setSpring(new SpringForce().setStiffness(650f).setDampingRatio(0.75f));
         }
 
-        // Category Tabs
-        tabAll = findViewById(R.id.tabAll);
-        tabMedia = findViewById(R.id.tabMedia);
-        tabTools = findViewById(R.id.tabTools);
-
-        tabAll.setOnClickListener(v -> selectCategory(AppAdapter.Category.ALL, tabAll));
-        tabMedia.setOnClickListener(v -> selectCategory(AppAdapter.Category.MEDIA, tabMedia));
-        tabTools.setOnClickListener(v -> selectCategory(AppAdapter.Category.TOOLS, tabTools));
-        selectCategory(AppAdapter.Category.ALL, tabAll);
-        // Down from a tab: the shelf when it is showing, else the dock tile we came from.
-        View.OnKeyListener tabKeys = (v, keyCode, event) -> {
-            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
-            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                if (layoutWatchNext.getVisibility() == View.VISIBLE && listWatchNext.getChildCount() > 0) {
-                    listWatchNext.getChildAt(0).findViewById(R.id.card).requestFocus();
-                } else {
-                    focusTile(lastDockFocused);
-                }
-                return true;
-            }
-            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v == tabAll) return true;
-            return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v == tabTools;
-        };
-        tabAll.setOnKeyListener(tabKeys);
-        tabMedia.setOnKeyListener(tabKeys);
-        tabTools.setOnKeyListener(tabKeys);
-
-        // Top HUD buttons
+        // Top bar
         View btnSearch = findViewById(R.id.btnSearch);
         View btnInputs = findViewById(R.id.btnInputs);
         View btnSettings = findViewById(R.id.btnSettings);
-
         btnSearch.setOnClickListener(v -> launchSearch());
         btnInputs.setOnClickListener(v -> showInputs());
         // A dongle has no HDMI inputs or tuner: the pill would only say "No inputs found".
         btnInputs.setVisibility(hasInputs() ? View.VISIBLE : View.GONE);
         btnWifi.setOnClickListener(v -> open(new Intent(Settings.ACTION_WIFI_SETTINGS)));
+        // Just the icon until focused; then the network name.
+        btnWifi.setOnFocusChangeListener((v, focused) -> applyWifiPill(focused));
+        applyWifiPill(false);
         btnSettings.setOnClickListener(v -> showLauncherSettings());
 
-        // Top bar D-Pad bounds
         View.OnKeyListener pillKeys = (v, keyCode, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) return true;
             if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                // Back to the dock tile we came from, not whatever the focus finder picks below.
-                focusTile(lastDockFocused);
+                // Back to where we came from, not whatever the focus finder picks below.
+                if (!focusFirstShelfCard()) focusTile(lastDockFocused);
                 return true;
             }
             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v.getId() == R.id.btnSearch) return true;
@@ -282,19 +272,28 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         btnWifi.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
 
+        // Hide the glass when focus leaves the tiles and the shelf cards (they share the "card" id).
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
-            // Shelf cards share the tiles' "card" id; the glass belongs to grid tiles only.
-            boolean onTile = newF != null && newF.getId() == R.id.card && grid.findContainingViewHolder(newF) != null;
-            if (!onTile) hideGlass();
+            boolean onCard = newF != null && newF.getId() == R.id.card
+                    && (grid.findContainingViewHolder(newF) != null || listWatchNext.findContainingViewHolder(newF) != null);
+            if (!onCard) hideGlass();
         });
     }
 
-    private void selectCategory(AppAdapter.Category cat, TextView selectedTab) {
-        adapter.setCategory(cat);
-        tabAll.setAlpha(0.6f);
-        tabMedia.setAlpha(0.6f);
-        tabTools.setAlpha(0.6f);
-        if (selectedTab != null) selectedTab.setAlpha(1.0f);
+    /** The grid's top padding parks the dock row at the bottom of the screen. */
+    private void updateGridPadding() {
+        int dockRow = adapter.dockCardHeightPx() + (int) ((45 + 6 + 12) * density);   // item padding, label, decoration
+        int want = Math.max(0, grid.getHeight() - dockRow - (int) (20 * density));
+        if (grid.getPaddingTop() != want) {
+            grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
+        }
+    }
+
+    @Override
+    public void onGridChanged(GridMath math) {
+        layout.setSpanCount(math.spanCount());
+        grid.invalidateItemDecorations();
+        updateGridPadding();
     }
 
     private void launchSearch() {
@@ -308,42 +307,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             try {
                 startActivity(search);
             } catch (Exception ex) {
-                Toast.makeText(this, "Поиск не поддерживается", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, R.string.search_unavailable, Toast.LENGTH_SHORT).show();
             }
         }
-    }
-
-    private void cleanRam() {
-        try {
-            ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
-            if (am != null) {
-                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
-                if (procs != null) {
-                    for (ActivityManager.RunningAppProcessInfo pi : procs) {
-                        if (!pi.processName.equals(getPackageName())) {
-                            am.killBackgroundProcesses(pi.processName);
-                        }
-                    }
-                }
-            }
-            System.gc();
-            Toast.makeText(this, "Память очищена! " + freeRamText(), Toast.LENGTH_SHORT).show();
-        } catch (Exception e) {
-            Toast.makeText(this, "Очистка RAM выполнена", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private String freeRamText() {
-        try {
-            ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
-            ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
-            if (am != null) {
-                am.getMemoryInfo(mi);
-                return (mi.availMem / (1024 * 1024)) + "M RAM";
-            }
-        } catch (Exception ignored) {
-        }
-        return "RAM";
     }
 
     private boolean hasInputs() {
@@ -385,7 +351,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             int pos = vh != null ? vh.getBindingAdapterPosition() : RecyclerView.NO_POSITION;
             if (returnToDock) {
                 returnToDock = false;
-                if (pos == RecyclerView.NO_POSITION || pos >= COLUMNS) {
+                if (pos == RecyclerView.NO_POSITION || !adapter.isDock(pos)) {
                     focusTile(lastDockFocused);
                     return;
                 }
@@ -393,6 +359,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (pos != RecyclerView.NO_POSITION) {
                 // Still on a tile: re-anchor the glass and hero without touching the list.
                 onTileFocused(pos, focused);
+                return;
+            }
+            if (focused != null && listWatchNext.findContainingViewHolder(focused) != null) {
+                onShelfCardFocused(focused);
                 return;
             }
             focusTile(lastFocused);
@@ -403,9 +373,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onDestroy() {
         super.onDestroy();
         unregisterReceiver(packageReceiver);
-        if (bridgeServer != null) {
-            bridgeServer.stop();
-        }
     }
 
     @Override
@@ -415,6 +382,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         handler.removeCallbacks(minuteTick);
         getContentResolver().unregisterContentObserver(bridgeObserver);
     }
+
+    // ---- continue watching shelf -----------------------------------------------------------------
 
     /** Reloads the shelf and shows it when it has something to continue. */
     private void refreshWatchNext() {
@@ -463,6 +432,22 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         updateShelfVisibility();
     }
 
+    private boolean focusFirstShelfCard() {
+        if (layoutWatchNext.getVisibility() != View.VISIBLE || listWatchNext.getChildCount() == 0) return false;
+        View card = listWatchNext.getChildAt(0).findViewById(R.id.card);
+        return card != null && card.requestFocus();
+    }
+
+    private void onShelfCardFocused(View card) {
+        glassOnShelf = true;
+        Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
+        root.offsetDescendantRectToMyCoords(card, r);
+        // Shelf cards grow from their top-left corner (see WatchNextAdapter), so the glass does too.
+        float pad = 6f * density, s = WatchNextAdapter.FOCUS_SCALE;
+        moveGlass(r.left - pad, r.top - pad, card.getWidth() * s + 2 * pad, card.getHeight() * s + 2 * pad,
+                16f * density * s + pad);
+    }
+
     private void showShelfItemMenu(WatchNextManager.WatchItem item, View card) {
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
@@ -470,24 +455,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
         popup.setAnimationStyle(0);
+        addMenuRow(rows, popup, R.drawable.ic_livetv, getString(R.string.open_app), () -> watchNextAdapter.openApp(item));
         addMenuRow(rows, popup, R.drawable.ic_hide, getString(R.string.remove_from_shelf), () -> {
-            if (item.fromBridge()) {
-                WatchNextManager.removeBridgeItem(this, item);
-            } else {
-                WatchNextManager.removeItem(this, watchNextAdapter.localIndexOf(item));
-            }
+            WatchNextManager.remove(this, item);
             refreshWatchNext();
             listWatchNext.post(() -> {
-                if (layoutWatchNext.getVisibility() == View.VISIBLE && listWatchNext.getChildCount() > 0) {
-                    listWatchNext.getChildAt(0).findViewById(R.id.card).requestFocus();
-                } else {
-                    focusTile(lastFocused);
-                }
+                if (!focusFirstShelfCard()) focusTile(lastDockFocused);
             });
         });
         popup.showAsDropDown(card, 0, (int) (8 * density), Gravity.START);
         rows.getChildAt(0).requestFocus();
     }
+
+    // ---- Home and Back ---------------------------------------------------------------------------
 
     @Override
     public void onBackPressed() {
@@ -504,35 +484,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (hasWindowFocus()) focusTile(lastDockFocused);
     }
 
-    @Override
-    public boolean onTileHorizontalKey(int position, int keyCode) {
-        // Stay put at a row's ends: the focus finder would otherwise jump to the top bar or a tab.
-        int col = position % COLUMNS;
-        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) return col == 0;
-        return col == COLUMNS - 1 || position == adapter.getItemCount() - 1;
-    }
-
     // ---- glass highlight -------------------------------------------------------------------------
 
-    @Override
-    public void onTileFocused(int position, View card) {
-        lastFocused = position;
-        if (position < COLUMNS) lastDockFocused = position;
-        setDockParked(position < COLUMNS);
-        Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
-        root.offsetDescendantRectToMyCoords(card, r);
-        float pad = 6f * density;
-        float w = card.getWidth() * AppAdapter.FOCUS_SCALE + 2 * pad;
-        float h = card.getHeight() * AppAdapter.FOCUS_SCALE + 2 * pad;
-        float x = r.exactCenterX() - w / 2f;
-        float y = r.exactCenterY() - h / 2f;
-
+    private void moveGlass(float x, float y, float w, float h, float radius) {
         ViewGroup.LayoutParams lp = glass.getLayoutParams();
         if (lp.width != (int) w || lp.height != (int) h) {
             lp.width = (int) w;
             lp.height = (int) h;
             glass.setLayoutParams(lp);
-            glass.setRadius(16f * density * AppAdapter.FOCUS_SCALE + pad);
+            glass.setRadius(radius);
         }
         glassTargetX = x;
         glassTargetY = y;
@@ -547,14 +507,33 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             springX.animateToFinalPosition(x);
             springY.animateToFinalPosition(y);
         }
+    }
+
+    @Override
+    public void onTileFocused(int position, View card) {
+        lastFocused = position;
+        boolean dock = adapter.isDock(position);
+        if (dock) lastDockFocused = position;
+        setDockParked(dock);
+        glassOnShelf = false;
+        // Tile rect in root coordinates, using layout positions (ignores the scale animation).
+        Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
+        root.offsetDescendantRectToMyCoords(card, r);
+        float pad = 6f * density;        // matches GlassView's glow inset
+        float w = card.getWidth() * AppAdapter.FOCUS_SCALE + 2 * pad;
+        float h = card.getHeight() * AppAdapter.FOCUS_SCALE + 2 * pad;
+        moveGlass(r.exactCenterX() - w / 2f, r.exactCenterY() - h / 2f, w, h, 16f * density * AppAdapter.FOCUS_SCALE + pad);
+
         View item = (View) card.getParent();
-        if (position < COLUMNS) {
+        if (dock) {
+            // Park the dock at the bottom of the screen and show the hero name for this app.
             int decoratedTop = item.getTop() - (int) (6 * density);
             int dy = decoratedTop - grid.getPaddingTop();
             if (Math.abs(dy) > 1) grid.smoothScrollBy(0, dy);
             showHero(position, r.top - dy);
         } else {
             hideHero();
+            // Scroll just enough so the whole glass (not only the tile) is visible.
             Rect want = new Rect(0, -(int) pad * 2, item.getWidth(), item.getHeight() + (int) pad);
             grid.requestChildRectangleOnScreen(item, want, false);
         }
@@ -562,7 +541,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public void onAmbientColorReady(int position, int color) {
-        if (position == lastFocused && position < COLUMNS && heroShown) {
+        if (position == lastFocused && adapter.isDock(position) && heroShown) {
             setAmbient(color);
             ambient.animate().alpha(1f).setDuration(400).start();
         }
@@ -573,6 +552,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int color = adapter.ambientColorAt(position);
         float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
+        // The shelf stands where the name would go.
         float heroAlpha = shelfHasItems() ? 0f : 1f;
 
         if (!heroShown) {
@@ -606,6 +586,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ambientColor = color;
         int c = color & 0x00FFFFFF;
         ambientGlow.setColors(new int[]{0x3D000000 | c, 0x1A000000 | c, 0x00000000 | c});
+        uiPrefs.edit().putInt(PREF_AMBIENT, color).apply();
     }
 
     private void hideHero() {
@@ -625,18 +606,24 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public boolean onTileVerticalKey(int position, int keyCode) {
-        int count = adapter.getItemCount();
-        int target;
+        GridMath m = adapter.math();
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            if (position < COLUMNS) return false;
-            target = position - COLUMNS;
-        } else {
-            int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
-            if (position >= lastRowStart) return true;
-            target = Math.min(position + COLUMNS, count - 1);
+            int target = m.up(position);
+            if (target < 0) return false;          // dock row: let focus move to the shelf or the top bar
+            focusTile(target);
+            return true;
         }
-        focusTile(target);
+        int target = m.down(position, adapter.getItemCount());
+        if (target != position) focusTile(target);
         return true;
+    }
+
+    @Override
+    public boolean onTileHorizontalKey(int position, int keyCode) {
+        // Stay put at a row's ends: the focus finder would otherwise jump to the top bar.
+        GridMath m = adapter.math();
+        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) return m.atLeftEdge(position);
+        return m.atRightEdge(position, adapter.getItemCount());
     }
 
     private void focusTile(int position) {
@@ -647,6 +634,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             vh.itemView.findViewById(R.id.card).requestFocus();
             return;
         }
+        // Not laid out yet: scroll there, then focus once the scroll settles.
         grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(@NonNull RecyclerView rv, int newState) {
@@ -660,7 +648,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.smoothScrollToPosition(pos);
     }
 
-    // ---- Context Menu & TV Remote Actions --------------------------------------------------------
+    // ---- long-press menu on a tile ---------------------------------------------------------------
 
     @Override
     public void onTileLongClicked(int position, View card, AppAdapter.Entry entry) {
@@ -668,17 +656,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
 
-        int width = (int) (220 * density);
-        final PopupWindow popup = new PopupWindow(panel, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        final PopupWindow popup = new PopupWindow(panel, (int) (220 * density), ViewGroup.LayoutParams.WRAP_CONTENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
         popup.setAnimationStyle(0);
         popup.setElevation(16f * density);
 
         AppPreferences prefs = adapter.getPreferences();
-        boolean isDocked = position < COLUMNS;
-
-        if (isDocked) {
+        if (adapter.isDock(position)) {
             if (position > 0) {
                 addMenuRow(rows, popup, R.drawable.ic_move, getString(R.string.move_left), () -> {
                     prefs.moveDockApp(entry.pkg, -1);
@@ -686,7 +671,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     grid.post(() -> focusTile(position - 1));
                 });
             }
-            if (position < COLUMNS - 1) {
+            if (position < adapter.dockSize() - 1) {
                 addMenuRow(rows, popup, R.drawable.ic_move, getString(R.string.move_right), () -> {
                     prefs.moveDockApp(entry.pkg, 1);
                     adapter.reload();
@@ -700,9 +685,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             });
         } else {
             addMenuRow(rows, popup, R.drawable.ic_pin, getString(R.string.pin_to_dock), () -> {
-                prefs.pinToDock(entry.pkg, COLUMNS);
+                prefs.pinToDock(entry.pkg, columns);
                 adapter.reload();
-                grid.post(() -> focusTile(0));
+                grid.post(() -> focusTile(Math.max(0, adapter.dockSize() - 1)));
             });
         }
 
@@ -726,73 +711,62 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         panel.setAlpha(0f);
         panel.setScaleY(0.92f);
         popup.showAtLocation(root, Gravity.CENTER, 0, 0);
-        panel.animate().alpha(1f).scaleY(1f).setDuration(200)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+        panel.animate().alpha(1f).scaleY(1f).setDuration(200).setInterpolator(new DecelerateInterpolator(1.6f)).start();
         rows.getChildAt(0).requestFocus();
     }
 
-    // ---- Launcher Settings Modal -----------------------------------------------------------------
+    // ---- launcher settings -----------------------------------------------------------------------
 
     private void showLauncherSettings() {
         View dialog = getLayoutInflater().inflate(R.layout.dialog_settings, root, false);
-
-        int width = (int) (480 * density);
-        final PopupWindow popup = new PopupWindow(dialog, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        final PopupWindow popup = new PopupWindow(dialog, (int) (480 * density), ViewGroup.LayoutParams.WRAP_CONTENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
         popup.setElevation(24f * density);
-
-        // VibeBridge can't listen yet (the launcher has no INTERNET permission), so don't advertise its address.
-        dialog.findViewById(R.id.bridgeInfo).setVisibility(View.GONE);
-
-        // RAM Clean Row
-        TextView lblRamClean = dialog.findViewById(R.id.lblRamClean);
-        lblRamClean.setText("Очистить оперативную память (" + freeRamText() + ")");
-        dialog.findViewById(R.id.rowRamClean).setOnClickListener(v -> {
-            cleanRam();
-            lblRamClean.setText("Память очищена! " + freeRamText());
-        });
-
-        // Watch Next Toggle Row
-        TextView lblToggle = dialog.findViewById(R.id.lblWatchNextToggle);
-        lblToggle.setText("Полка «Продолжить просмотр»: " + (showWatchNext ? "Вкл" : "Выкл"));
-        dialog.findViewById(R.id.rowToggleWatchNext).setOnClickListener(v -> {
-            showWatchNext = !showWatchNext;
-            uiPrefs.edit().putBoolean("show_watch_next", showWatchNext).apply();
-            refreshWatchNext();
-            lblToggle.setText("Полка «Продолжить просмотр»: " + (showWatchNext ? "Вкл" : "Выкл"));
-        });
-
-        // Unhide All Apps Row
         AppPreferences prefs = adapter.getPreferences();
-        Set<String> hidden = prefs.getHiddenApps();
-        TextView lblUnhide = dialog.findViewById(R.id.lblUnhideAll);
-        lblUnhide.setText("Восстановить скрытые приложения (" + hidden.size() + ")");
-        dialog.findViewById(R.id.rowUnhideAll).setOnClickListener(v -> {
-            for (String p : new ArrayList<>(hidden)) {
-                prefs.unhideApp(p);
-            }
-            adapter.reload();
-            lblUnhide.setText("Все приложения восстановлены");
-            Toast.makeText(this, "Все приложения восстановлены", Toast.LENGTH_SHORT).show();
+
+        TextView lblShelf = dialog.findViewById(R.id.lblShelf);
+        Runnable shelfText = () -> lblShelf.setText(showWatchNext ? R.string.shelf_on : R.string.shelf_off);
+        shelfText.run();
+        dialog.findViewById(R.id.rowShelf).setOnClickListener(v -> {
+            showWatchNext = !showWatchNext;
+            uiPrefs.edit().putBoolean(PREF_SHOW_SHELF, showWatchNext).apply();
+            refreshWatchNext();
+            shelfText.run();
         });
 
-        // Reset Dock Order
+        TextView lblSort = dialog.findViewById(R.id.lblSort);
+        Runnable sortText = () -> lblSort.setText(prefs.isSortByRecent() ? R.string.sort_recent : R.string.sort_alpha);
+        sortText.run();
+        dialog.findViewById(R.id.rowSort).setOnClickListener(v -> {
+            prefs.setSortByRecent(!prefs.isSortByRecent());
+            adapter.reload();
+            sortText.run();
+        });
+
+        Set<String> hidden = prefs.getHiddenApps();
+        TextView lblUnhide = dialog.findViewById(R.id.lblUnhide);
+        lblUnhide.setText(getString(R.string.unhide_all_count, hidden.size()));
+        dialog.findViewById(R.id.rowUnhide).setOnClickListener(v -> {
+            for (String p : new ArrayList<>(hidden)) prefs.unhideApp(p);
+            adapter.reload();
+            lblUnhide.setText(R.string.all_restored);
+        });
+
         dialog.findViewById(R.id.rowResetDock).setOnClickListener(v -> {
             prefs.resetToDefaults();
             adapter.reload();
-            Toast.makeText(this, "Порядок Dock сброшен", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.dock_reset, Toast.LENGTH_SHORT).show();
             popup.dismiss();
         });
 
-        // System Settings
-        dialog.findViewById(R.id.rowSystemSettings).setOnClickListener(v -> {
+        dialog.findViewById(R.id.rowSystem).setOnClickListener(v -> {
             popup.dismiss();
             open(new Intent(Settings.ACTION_SETTINGS));
         });
 
         popup.showAtLocation(root, Gravity.CENTER, 0, 0);
-        dialog.findViewById(R.id.rowRamClean).requestFocus();
+        dialog.findViewById(R.id.rowShelf).requestFocus();
     }
 
     private void addMenuRow(LinearLayout rows, PopupWindow popup, int iconRes, String title, Runnable action) {
@@ -821,6 +795,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         greeting.setText(res);
     }
 
+    /** The Wi-Fi network name when we can read it, otherwise the connection type. */
     private void updateWifiLabel() {
         String text = getString(R.string.wifi);
         try {
@@ -842,7 +817,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         } catch (Exception ignored) {
         }
-        btnWifi.setText(text);
+        wifiText = text;
+        applyWifiPill(btnWifi.hasFocus());
+    }
+
+    /** Collapsed to a round icon; the network name unfolds on focus. */
+    private void applyWifiPill(boolean expanded) {
+        btnWifi.setText(expanded ? wifiText : "");
+        btnWifi.setCompoundDrawablePadding(expanded ? (int) (9 * density) : 0);
+        btnWifi.setPadding((int) ((expanded ? 16 : 11) * density), 0, (int) ((expanded ? 20 : 11) * density), 0);
     }
 
     private void open(Intent i) {
@@ -850,10 +833,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         try {
             startActivity(i);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "Not available on this TV", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
         }
     }
 
+    /** Dropdown menu under the Inputs pill: HDMI ports (with connection state), AV and Live TV. */
     private void showInputs() {
         View anchor = findViewById(R.id.btnInputs);
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
@@ -861,7 +845,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         int width = Math.max(anchor.getWidth(), (int) (150 * density));
         final PopupWindow popup = new PopupWindow(panel, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
-        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));   // needed for Back to dismiss
         popup.setOutsideTouchable(true);
         popup.setAnimationStyle(0);
         popup.setElevation(0f);
@@ -906,7 +890,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         panel.setTranslationY(-8 * density);
         popup.showAsDropDown(anchor, 0, (int) (10 * density), Gravity.START);
         panel.animate().alpha(1f).scaleY(1f).translationY(0f).setDuration(220)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+                .setInterpolator(new DecelerateInterpolator(1.6f)).start();
         rows.getChildAt(0).requestFocus();
     }
 
@@ -925,6 +909,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ((TextView) row.findViewById(R.id.title)).setText(title);
         TextView status = row.findViewById(R.id.status);
         View dot = row.findViewById(R.id.dot);
+        // Some TVs report "standby" for every port whether or not something is plugged in, so only
+        // definite states are shown.
         if (state == TvInputManager.INPUT_STATE_CONNECTED) {
             status.setText(R.string.connected);
             dot.setVisibility(View.VISIBLE);

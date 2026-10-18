@@ -163,44 +163,6 @@
             </LinearLayout>
         </RelativeLayout>
 
-        <!-- Category Filter Tabs -->
-        <LinearLayout
-            android:id="@+id/layoutCategories"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="4dp">
-
-            <TextView
-                android:id="@+id/tabAll"
-                style="@style/TopButton"
-                android:layout_marginStart="0dp"
-                android:layout_height="32dp"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:text="@string/tab_all"
-                android:textSize="13sp" />
-
-            <TextView
-                android:id="@+id/tabMedia"
-                style="@style/TopButton"
-                android:layout_height="32dp"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:text="@string/tab_media"
-                android:textSize="13sp" />
-
-            <TextView
-                android:id="@+id/tabTools"
-                style="@style/TopButton"
-                android:layout_height="32dp"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:text="@string/tab_tools"
-                android:textSize="13sp" />
-        </LinearLayout>
-
         <!-- Apps Grid wrapper -->
         <FrameLayout
             android:layout_width="match_parent"

@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Домой</string>
+    <string name="dream_name">Часы</string>
     <string name="inputs">Входы</string>
     <string name="wifi">Wi-Fi</string>
     <string name="settings">Настройки</string>
     <string name="search">Поиск</string>
-    <string name="choose_input">Входы</string>
     <string name="connected">Подключено</string>
-    <string name="standby">Ожидание</string>
     <string name="not_connected">Нет устройства</string>
     <string name="live_tv">Эфирное ТВ</string>
     <string name="no_inputs">Входов не найдено</string>
@@ -17,6 +16,9 @@
     <string name="good_night">Доброй ночи</string>
     <string name="ethernet">Ethernet</string>
     <string name="offline">Нет сети</string>
+    <string name="search_unavailable">Поиск на этом ТВ недоступен</string>
+    <string name="not_available">На этом ТВ недоступно</string>
+    <string name="could_not_open">Не удалось открыть %1$s</string>
 
     <string name="pin_to_dock">Закрепить в доке</string>
     <string name="unpin_from_dock">Убрать из дока</string>
@@ -24,17 +26,23 @@
     <string name="move_right">Сдвинуть вправо</string>
     <string name="hide_app">Скрыть</string>
     <string name="app_info">О приложении</string>
-    <string name="app_options">Действия</string>
-    <string name="hidden_apps_title">Скрытые приложения</string>
-    <string name="unhide_all">Вернуть все скрытые</string>
-    <string name="unhide">Вернуть</string>
-    <string name="cant_open">Не удалось открыть</string>
-
-    <string name="tab_all">Все</string>
-    <string name="tab_media">Кино и ТВ</string>
-    <string name="tab_tools">Утилиты</string>
 
     <string name="continue_watching">Продолжить просмотр</string>
     <string name="resume_from">Продолжить с %1$s</string>
+    <string name="time_left">осталось %1$s</string>
+    <string name="hours_minutes">%1$d ч %2$d мин</string>
+    <string name="minutes_only">%1$d мин</string>
+    <string name="open_app">Открыть приложение</string>
     <string name="remove_from_shelf">Убрать из «Продолжить»</string>
+
+    <string name="settings_title">Настройки лаунчера</string>
+    <string name="shelf_on">Полка «Продолжить просмотр»: вкл</string>
+    <string name="shelf_off">Полка «Продолжить просмотр»: выкл</string>
+    <string name="sort_recent">Порядок в сетке: недавние сначала</string>
+    <string name="sort_alpha">Порядок в сетке: по алфавиту</string>
+    <string name="unhide_all_count">Вернуть скрытые приложения (%1$d)</string>
+    <string name="all_restored">Все приложения возвращены</string>
+    <string name="reset_dock">Сбросить док к настройкам по умолчанию</string>
+    <string name="dock_reset">Док сброшен</string>
+    <string name="system_settings">Настройки Android</string>
 </resources>

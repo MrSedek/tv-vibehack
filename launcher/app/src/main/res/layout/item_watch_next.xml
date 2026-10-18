@@ -11,18 +11,10 @@
         android:layout_width="190dp"
         android:layout_height="105dp"
         android:background="@drawable/tile_bg"
-        android:foreground="@drawable/shelf_focus_ring"
         android:focusable="true"
         android:clickable="true">
 
-        <!-- Ambient Backdrop gradient -->
-        <View
-            android:id="@+id/backdrop"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="#1A1A22" />
-
-        <!-- Thumbnail from the bridge, when the player reported one -->
+        <!-- The bridge's thumbnail, or the app's banner dimmed when the player reported none -->
         <ImageView
             android:id="@+id/thumb"
             android:layout_width="match_parent"
@@ -39,7 +31,7 @@
             android:background="@drawable/shelf_scrim"
             android:visibility="gone" />
 
-        <!-- Source badge (e.g., SmartTube, Kinopoisk) -->
+        <!-- App name -->
         <TextView
             android:id="@+id/badge"
             android:layout_width="wrap_content"
@@ -57,7 +49,25 @@
             android:fontVariationSettings="'wght' 500"
             android:textAllCaps="true" />
 
-        <!-- Play overlay indicator -->
+        <!-- Time left -->
+        <TextView
+            android:id="@+id/remaining"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_margin="10dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:background="@drawable/shelf_badge_bg"
+            android:textColor="#CCFFFFFF"
+            android:textSize="10sp"
+            android:fontFamily="@font/manrope"
+            android:fontVariationSettings="'wght' 500"
+            android:visibility="gone" />
+
+        <!-- Shown when there is no picture at all -->
         <ImageView
             android:id="@+id/playIcon"
             android:layout_width="28dp"
@@ -67,13 +77,12 @@
             android:tint="#80FFFFFF"
             android:contentDescription="@null" />
 
-        <!-- Video title -->
         <TextView
             android:id="@+id/title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"
-            android:layout_marginBottom="8dp"
+            android:layout_marginBottom="10dp"
             android:paddingStart="10dp"
             android:paddingEnd="10dp"
             android:singleLine="true"
@@ -83,16 +92,15 @@
             android:fontFamily="@font/manrope"
             android:fontVariationSettings="'wght' 500" />
 
-        <!-- Progress bar line at the bottom -->
         <ProgressBar
             android:id="@+id/progressBar"
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent"
-            android:layout_height="3dp"
+            android:layout_height="5dp"
             android:layout_gravity="bottom"
             android:max="100"
-            android:progress="50"
-            android:progressBackgroundTint="#33FFFFFF"
-            android:progressTint="#0A84FF" />
+            android:progress="0"
+            android:progressBackgroundTint="#40FFFFFF"
+            android:progressTint="#F2FFFFFF" />
     </FrameLayout>
 </FrameLayout>

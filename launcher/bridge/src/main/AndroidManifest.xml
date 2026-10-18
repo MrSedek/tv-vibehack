@@ -27,6 +27,17 @@
             </intent-filter>
         </service>
 
+        <!-- Settings over adb; the shell holds DUMP, ordinary apps can't get it. See ConfigReceiver. -->
+        <receiver
+            android:name=".ConfigReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.gathin.tvbridge.CONFIGURE" />
+                <action android:name="com.gathin.tvbridge.SYNC" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name=".HistoryProvider"
             android:authorities="com.gathin.tvbridge.history"

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Xiaomi TV Stick 4K profile (the "stick" flavour): no HDMI inputs, no tuner, a 1080p picture
+  with room for five columns. Dock order and hidden apps can still be changed from the remote.
+-->
+<resources>
+    <string-array name="dock_apps">
+        <item>ru.astroapps.hdrezka</item>
+        <item>org.smarttube.beta</item>
+        <item>org.jellyfin.androidtv</item>
+        <item>com.vk.tv</item>
+    </string-array>
+
+    <string-array name="hidden_apps" />
+
+    <string name="live_tv_package" translatable="false"></string>
+
+    <integer name="columns">5</integer>
+</resources>

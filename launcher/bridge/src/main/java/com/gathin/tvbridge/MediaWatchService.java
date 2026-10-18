@@ -53,6 +53,7 @@ public class MediaWatchService extends NotificationListenerService {
         } catch (SecurityException e) {
             Log.w(TAG, "no access to media sessions; is the listener allowed?", e);
         }
+        JellyfinSync.get(this).start();
     }
 
     @Override
@@ -60,6 +61,7 @@ public class MediaWatchService extends NotificationListenerService {
         if (sessions != null) sessions.removeOnActiveSessionsChangedListener(sessionsListener);
         for (Tracked t : tracked.values()) t.end();
         tracked.clear();
+        JellyfinSync.get(this).stop();
     }
 
     private void onSessionsChanged(List<MediaController> controllers) {
@@ -125,6 +127,11 @@ public class MediaWatchService extends NotificationListenerService {
 
         private void snapshot() {
             if (state == null) return;
+            if (JellyfinSync.PKG.equals(controller.getPackageName())) {
+                // Its session carries nothing; the server will know the new position in a moment.
+                JellyfinSync.get(MediaWatchService.this).syncSoon(4000);
+                return;
+            }
             WatchItem w = new WatchItem();
             w.pkg = controller.getPackageName();
             boolean playing = state.getState() == PlaybackState.STATE_PLAYING;

@@ -8,8 +8,10 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -44,6 +46,7 @@ final class HistoryStore {
         this.file = new File(ctx.getFilesDir(), "history.json");
         this.artDir = new File(ctx.getFilesDir(), "art");
         history.restore(load());
+        if (history.expire(System.currentTimeMillis())) commit();
     }
 
     synchronized List<WatchItem> items() {
@@ -55,8 +58,10 @@ final class HistoryStore {
      * the player didn't name, the title is looked up by id.
      */
     synchronized void record(WatchItem snap, Bitmap art, boolean youtube) {
-        if (!history.record(snap)) return;
-        commit();
+        boolean expired = history.expire(System.currentTimeMillis());
+        boolean changed = history.record(snap);
+        if (expired || changed) commit();
+        if (!changed) return;
         if (youtube && snap.title == null) {
             String key = snap.key(), id = snap.mediaId;
             io.execute(() -> fetchYouTubeTitle(key, id));
@@ -64,10 +69,16 @@ final class HistoryStore {
         File target = artFile(snap.key());
         if (art != null) {
             io.execute(() -> saveArt(target, art));
-        } else if (!target.exists() && snap.artUrl != null && snap.artUrl.startsWith("http")) {
-            String url = snap.artUrl;
-            io.execute(() -> fetchArt(target, url));
+        } else {
+            fetchArtIfMissing(snap);
         }
+    }
+
+    /** Swaps in a server's list for one app (see {@link History#replaceSource}). */
+    synchronized void replaceSource(String pkg, List<WatchItem> fresh) {
+        if (!history.replaceSource(pkg, fresh)) return;
+        commit();
+        for (WatchItem w : fresh) fetchArtIfMissing(w);
     }
 
     synchronized boolean remove(String key) {
@@ -105,6 +116,13 @@ final class HistoryStore {
         HistoryProvider.notifyChanged(ctx);
     }
 
+    private void fetchArtIfMissing(WatchItem w) {
+        File target = artFile(w.key());
+        if (target.exists() || w.artUrl == null || !w.artUrl.startsWith("http")) return;
+        String url = w.artUrl;
+        io.execute(() -> fetchArt(target, url));
+    }
+
     // ---- JSON ------------------------------------------------------------------------------------
 
     private List<WatchItem> load() {
@@ -123,6 +141,8 @@ final class HistoryStore {
                 w.durationMs = o.optLong("durationMs");
                 w.positionMs = o.optLong("positionMs");
                 w.updatedAt = o.optLong("updatedAt");
+                w.fromServer = o.optBoolean("fromServer");
+                w.intentUri = o.optString("intentUri", null);
                 out.add(w);
             }
         } catch (Exception e) {
@@ -144,6 +164,8 @@ final class HistoryStore {
                 o.put("durationMs", w.durationMs);
                 o.put("positionMs", w.positionMs);
                 o.put("updatedAt", w.updatedAt);
+                if (w.fromServer) o.put("fromServer", true);
+                o.putOpt("intentUri", w.intentUri);
                 arr.put(o);
             }
             File tmp = new File(file.getPath() + ".tmp");
@@ -177,8 +199,8 @@ final class HistoryStore {
         }
     }
 
-    private static byte[] readAll(InputStream in) throws java.io.IOException {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+    static byte[] readAll(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buf = new byte[8192];
         for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
         return out.toByteArray();

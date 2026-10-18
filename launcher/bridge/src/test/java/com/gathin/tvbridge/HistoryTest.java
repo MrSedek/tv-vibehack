@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class HistoryTest {
@@ -135,5 +136,53 @@ public class HistoryTest {
         assertEquals(15_000, History.positionAt(10_000, 1_000, 1f, true, 6_000));
         assertEquals(10_000, History.positionAt(10_000, 1_000, 1f, false, 6_000));
         assertEquals(20_000, History.positionAt(10_000, 1_000, 2f, true, 6_000));
+    }
+
+    @Test
+    public void oldSessionEntriesExpire() {
+        History h = new History();
+        long day = 24L * 3600 * 1000;
+        h.record(item("st", "old", "Old", 60_000, 600_000, 1000));
+        h.record(item("st", "new", "New", 60_000, 600_000, 40 * day));
+        assertTrue(h.expire(40 * day));
+        assertEquals(List.of("new"), ids(h));
+        assertEquals(List.of("st|id:old"), h.takeRemovedKeys());
+        assertFalse(h.expire(40 * day));
+    }
+
+    @Test
+    public void serverEntriesDoNotExpire() {
+        History h = new History();
+        h.replaceSource("jf", List.of(item("jf", "ep1", "Show", 0, 1_000_000, 1000)));
+        assertFalse(h.expire(365L * 24 * 3600 * 1000));
+        assertEquals(1, h.items().size());
+    }
+
+    @Test
+    public void replaceSourceSwapsOnlyThatApp() {
+        History h = new History();
+        h.record(item("st", "abc", "Ramen", 20_000, 600_000, 5000));
+        assertTrue(h.replaceSource("jf", List.of(item("jf", "a", "A", 0, 100, 9000), item("jf", "b", "B", 0, 100, 1000))));
+        assertEquals(List.of("a", "abc", "b"), ids(h));              // merged by time, newest first
+        assertTrue(h.replaceSource("jf", List.of(item("jf", "c", "C", 0, 100, 7000))));
+        assertEquals(List.of("c", "abc"), ids(h));
+        assertTrue(h.takeRemovedKeys().containsAll(List.of("jf|id:a", "jf|id:b")));
+        assertFalse(h.replaceSource("jf", List.of(item("jf", "c", "C", 0, 100, 7000))));   // same list again
+        assertTrue(h.replaceSource("jf", List.of()));
+        assertEquals(List.of("abc"), ids(h));
+    }
+
+    @Test
+    public void serverEntriesMayStartAtZero() {
+        History h = new History();
+        h.replaceSource("jf", List.of(item("jf", "next", "Next up", 0, 100, 1)));
+        assertEquals(1, h.items().size());
+        assertTrue(h.items().get(0).fromServer);
+    }
+
+    private static List<String> ids(History h) {
+        List<String> out = new ArrayList<>();
+        for (WatchItem w : h.items()) out.add(w.mediaId);
+        return out;
     }
 }

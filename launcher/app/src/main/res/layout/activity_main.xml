@@ -138,15 +138,13 @@
                     android:id="@+id/btnSearch"
                     style="@style/TopIconButton"
                     android:src="@drawable/ic_search"
-                    android:contentDescription="@string/search"
-                    android:nextFocusDown="@+id/grid" />
+                    android:contentDescription="@string/search" />
 
                 <TextView
                     android:id="@+id/btnInputs"
                     style="@style/TopButton"
                     android:text="@string/inputs"
-                    android:drawableStart="@drawable/ic_input"
-                    android:nextFocusDown="@+id/grid" />
+                    android:drawableStart="@drawable/ic_input" />
 
                 <TextView
                     android:id="@+id/btnWifi"
@@ -155,15 +153,13 @@
                     android:drawableStart="@drawable/ic_wifi"
                     android:maxWidth="240dp"
                     android:singleLine="true"
-                    android:ellipsize="end"
-                    android:nextFocusDown="@+id/grid" />
+                    android:ellipsize="end" />
 
                 <ImageView
                     android:id="@+id/btnSettings"
                     style="@style/TopIconButton"
                     android:src="@drawable/ic_settings"
-                    android:contentDescription="@string/settings"
-                    android:nextFocusDown="@+id/grid" />
+                    android:contentDescription="@string/settings" />
             </LinearLayout>
         </RelativeLayout>
 

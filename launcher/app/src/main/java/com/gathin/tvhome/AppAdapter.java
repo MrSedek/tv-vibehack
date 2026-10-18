@@ -49,6 +49,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     interface TileListener {
         void onTileFocused(int position, View card);
         boolean onTileVerticalKey(int position, int keyCode);
+        /** Called for D-pad Left/Right on a tile. Return true to keep focus where it is. */
+        boolean onTileHorizontalKey(int position, int keyCode);
         void onTileLongClicked(int position, View card, Entry entry);
         void onAmbientColorReady(int position, int color);
     }
@@ -121,11 +123,17 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             if (ri.activityInfo == null) continue;
             String pkg = ri.activityInfo.packageName;
             if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg)) continue;
-            Drawable banner = ri.activityInfo.loadBanner(pm);
-            if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
-            Drawable icon = ri.loadIcon(pm);
-            String label = String.valueOf(ri.loadLabel(pm));
-            fresh.add(new Entry(label, new ComponentName(pkg, ri.activityInfo.name), banner, icon));
+            // One app with a broken banner must not take the home screen down with it: the stock
+            // launcher is disabled, so a crash loop here means a black screen until someone has adb.
+            try {
+                Drawable banner = ri.activityInfo.loadBanner(pm);
+                if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
+                Drawable icon = ri.loadIcon(pm);
+                String label = String.valueOf(ri.loadLabel(pm));
+                fresh.add(new Entry(label, new ComponentName(pkg, ri.activityInfo.name), banner, icon));
+            } catch (Throwable t) {
+                android.util.Log.w("TvHome", "skipping " + pkg, t);
+            }
         }
 
         Collections.sort(fresh, (a, b) -> {
@@ -384,6 +392,9 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
                 if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                     return listener.onTileVerticalKey(pos, keyCode);
                 }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    return listener.onTileHorizontalKey(pos, keyCode);
+                }
                 return false;
             });
 
@@ -404,13 +415,14 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
 
             card.setOnFocusChangeListener((view, focused) -> {
                 float s = focused ? FOCUS_SCALE : 1.0f;
+                // Short enough to finish between D-pad auto-repeats.
                 view.animate().scaleX(s).scaleY(s)
-                        .setDuration(focused ? 260 : 180)
-                        .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
+                        .setDuration(focused ? 150 : 120)
+                        .setInterpolator(new OvershootInterpolator(focused ? 1.1f : 0f))
                         .start();
                 name.animate().alpha(focused ? 1f : 0f)
                         .translationY(focused ? density * 4f : -density * 6f)
-                        .setDuration(220).start();
+                        .setDuration(150).start();
                 int pos = getBindingAdapterPosition();
                 if (focused && listener != null && pos != RecyclerView.NO_POSITION) {
                     listener.onTileFocused(pos, view);

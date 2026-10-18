@@ -3,8 +3,10 @@ package com.gathin.tvhome;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.database.ContentObserver;
 import android.graphics.Color;
@@ -85,6 +87,22 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int lastDockFocused = 0;
     /** The grid sits at rest with the dock at the bottom (not scrolled into the app rows). */
     private boolean dockParked = true;
+    /** Home was pressed while we were away (or in the grid): land on the dock. */
+    private boolean returnToDock;
+    /** The app list needs rereading: first show, or a package came or went. */
+    private boolean appsDirty = true;
+    private boolean everResumed;
+    private boolean resumed;
+    private final BroadcastReceiver packageReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            appsDirty = true;
+            if (resumed) {
+                appsDirty = false;
+                adapter.reload();
+            }
+        }
+    };
     private float density;
 
     // Continue Watching shelf
@@ -168,6 +186,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         adapter = new AppAdapter(this, this, COLUMNS);
         grid.setAdapter(adapter);
 
+        // Reread the app list only when a package comes or goes, not on every Home press.
+        IntentFilter packages = new IntentFilter();
+        packages.addAction(Intent.ACTION_PACKAGE_ADDED);
+        packages.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        packages.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        packages.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        packages.addDataScheme("package");
+        registerReceiver(packageReceiver, packages);
+
         // Layout adjustment for dock shelf
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             int h = b - t;
@@ -195,7 +222,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         springX = new SpringAnimation(glass, DynamicAnimation.TRANSLATION_X);
         springY = new SpringAnimation(glass, DynamicAnimation.TRANSLATION_Y);
         for (SpringAnimation s : new SpringAnimation[]{springX, springY}) {
-            s.setSpring(new SpringForce().setStiffness(260f).setDampingRatio(0.58f));
+            // Firm enough to keep up with D-pad auto-repeat; the old 260/0.58 drifted for ~0.4 s.
+            s.setSpring(new SpringForce().setStiffness(650f).setDampingRatio(0.75f));
         }
 
         // Category Tabs
@@ -207,6 +235,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         tabMedia.setOnClickListener(v -> selectCategory(AppAdapter.Category.MEDIA, tabMedia));
         tabTools.setOnClickListener(v -> selectCategory(AppAdapter.Category.TOOLS, tabTools));
         selectCategory(AppAdapter.Category.ALL, tabAll);
+        // Down from a tab: the shelf when it is showing, else the dock tile we came from.
+        View.OnKeyListener tabKeys = (v, keyCode, event) -> {
+            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (layoutWatchNext.getVisibility() == View.VISIBLE && listWatchNext.getChildCount() > 0) {
+                    listWatchNext.getChildAt(0).findViewById(R.id.card).requestFocus();
+                } else {
+                    focusTile(lastDockFocused);
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v == tabAll) return true;
+            return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v == tabTools;
+        };
+        tabAll.setOnKeyListener(tabKeys);
+        tabMedia.setOnKeyListener(tabKeys);
+        tabTools.setOnKeyListener(tabKeys);
 
         // Top HUD buttons
         View btnSearch = findViewById(R.id.btnSearch);
@@ -224,6 +269,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View.OnKeyListener pillKeys = (v, keyCode, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) return true;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                // Back to the dock tile we came from, not whatever the focus finder picks below.
+                focusTile(lastDockFocused);
+                return true;
+            }
             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v.getId() == R.id.btnSearch) return true;
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == R.id.btnSettings;
         };
@@ -309,12 +359,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onResume() {
         super.onResume();
-        glassShown = false;
-        glass.setAlpha(0f);
-        heroShown = false;
-        heroName.setAlpha(0f);
-        ambient.setAlpha(0f);
-        adapter.reload();
+        resumed = true;
+        // No reload and no entrance animation on an ordinary return: on this CPU they made every
+        // Home press look like the launcher restarting.
+        if (appsDirty) {
+            appsDirty = false;
+            adapter.reload();
+            if (!everResumed) grid.scheduleLayoutAnimation();
+        }
+        everResumed = true;
         refreshWatchNext();
         try {
             // Picks up the pause the bridge records just after you press Home.
@@ -322,14 +375,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } catch (SecurityException e) {
             // Bridge not installed.
         }
-        grid.scheduleLayoutAnimation();
         updateGreeting();
         updateWifiLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
 
         grid.post(() -> {
             View focused = getCurrentFocus();
-            if (focused != null && grid.findContainingViewHolder(focused) != null) return;
+            RecyclerView.ViewHolder vh = focused != null ? grid.findContainingViewHolder(focused) : null;
+            int pos = vh != null ? vh.getBindingAdapterPosition() : RecyclerView.NO_POSITION;
+            if (returnToDock) {
+                returnToDock = false;
+                if (pos == RecyclerView.NO_POSITION || pos >= COLUMNS) {
+                    focusTile(lastDockFocused);
+                    return;
+                }
+            }
+            if (pos != RecyclerView.NO_POSITION) {
+                // Still on a tile: re-anchor the glass and hero without touching the list.
+                onTileFocused(pos, focused);
+                return;
+            }
             focusTile(lastFocused);
         });
     }
@@ -337,6 +402,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        unregisterReceiver(packageReceiver);
         if (bridgeServer != null) {
             bridgeServer.stop();
         }
@@ -345,6 +411,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onPause() {
         super.onPause();
+        resumed = false;
         handler.removeCallbacks(minuteTick);
         getContentResolver().unregisterContentObserver(bridgeObserver);
     }
@@ -430,9 +497,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        // Home lands on the dock, not wherever in the grid you were.
+        // Home lands on the dock, not wherever in the grid you were. The window usually isn't
+        // focused yet here, so onResume finishes the job.
+        returnToDock = true;
         lastFocused = lastDockFocused;
         if (hasWindowFocus()) focusTile(lastDockFocused);
+    }
+
+    @Override
+    public boolean onTileHorizontalKey(int position, int keyCode) {
+        // Stay put at a row's ends: the focus finder would otherwise jump to the top bar or a tab.
+        int col = position % COLUMNS;
+        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) return col == 0;
+        return col == COLUMNS - 1 || position == adapter.getItemCount() - 1;
     }
 
     // ---- glass highlight -------------------------------------------------------------------------

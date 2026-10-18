@@ -2,6 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
+// Release signing comes from the environment so the launcher and the bridge carry the same key on
+// every machine (their signature permission depends on it). tools/make-keystore.sh creates one.
+def keystore = System.getenv('TVHOME_KEYSTORE')
+
 android {
     namespace 'com.gathin.tvhome'
     compileSdk 34
@@ -10,23 +14,51 @@ android {
         applicationId 'com.gathin.tvhome'
         minSdk 26
         targetSdk 29
-        versionCode 2
-        versionName '2.0'
+        versionCode 3
+        versionName '3.0'
+    }
+
+    signingConfigs {
+        if (keystore) {
+            release {
+                storeFile file(keystore)
+                storePassword System.getenv('TVHOME_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('TVHOME_KEY_ALIAS') ?: 'tvhome'
+                keyPassword System.getenv('TVHOME_KEY_PASSWORD') ?: System.getenv('TVHOME_KEYSTORE_PASSWORD')
+            }
+        }
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (keystore) signingConfig signingConfigs.release
         }
+    }
+
+    // One flavour per TV model: src/<flavour>/res/values/config.xml overrides the generic one.
+    flavorDimensions 'tv'
+    productFlavors {
+        generic { dimension 'tv' }
+        stick { dimension 'tv' }     // Xiaomi TV Stick 4K
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    lint {
+        // Sideloaded over adb, never on Google Play; targetSdk 29 keeps the package-visibility rules of
+        // Android 10, which the launcher's app list and the bridge's resume intents rely on.
+        disable 'ExpiredTargetSdkVersion'
+    }
 }
 
 dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
     implementation 'androidx.dynamicanimation:dynamicanimation:1.0.0'
+    testImplementation 'junit:junit:4.13.2'
 }

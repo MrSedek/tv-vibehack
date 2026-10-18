@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/panel"
+    android:layout_width="480dp"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/glass_panel"
+    android:padding="20dp"
+    android:elevation="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="14dp"
+        android:text="@string/settings_title"
+        android:textColor="#FFFFFFFF"
+        android:textSize="20sp"
+        android:fontFamily="@font/manrope"
+        android:fontVariationSettings="'wght' 500"
+        android:letterSpacing="-0.01" />
+
+    <LinearLayout
+        android:id="@+id/rowShelf"
+        style="@style/SettingsRow">
+
+        <ImageView
+            style="@style/SettingsRowIcon"
+            android:src="@drawable/ic_livetv" />
+
+        <TextView
+            android:id="@+id/lblShelf"
+            style="@style/SettingsRowText" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/rowSort"
+        style="@style/SettingsRow">
+
+        <ImageView
+            style="@style/SettingsRowIcon"
+            android:src="@drawable/ic_move" />
+
+        <TextView
+            android:id="@+id/lblSort"
+            style="@style/SettingsRowText" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/rowUnhide"
+        style="@style/SettingsRow">
+
+        <ImageView
+            style="@style/SettingsRowIcon"
+            android:src="@drawable/ic_hide" />
+
+        <TextView
+            android:id="@+id/lblUnhide"
+            style="@style/SettingsRowText" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/rowResetDock"
+        style="@style/SettingsRow">
+
+        <ImageView
+            style="@style/SettingsRowIcon"
+            android:src="@drawable/ic_unpin" />
+
+        <TextView
+            style="@style/SettingsRowText"
+            android:text="@string/reset_dock" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/rowSystem"
+        style="@style/SettingsRow">
+
+        <ImageView
+            style="@style/SettingsRowIcon"
+            android:src="@drawable/ic_settings" />
+
+        <TextView
+            style="@style/SettingsRowText"
+            android:text="@string/system_settings" />
+    </LinearLayout>
+</LinearLayout>

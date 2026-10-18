@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <!-- Only to fetch the artwork URL a player reports (SmartTube: the YouTube thumbnail). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Only apps signed with the same key (the launcher) may read the history. -->
+    <permission
+        android:name="com.gathin.tvbridge.permission.READ_HISTORY"
+        android:protectionLevel="signature" />
+
+    <application
+        android:label="@string/app_name"
+        android:allowBackup="false">
+
+        <!-- Enabled over adb: cmd notification allow_listener com.gathin.tvbridge/.MediaWatchService -->
+        <service
+            android:name=".MediaWatchService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Settings over adb; the shell holds DUMP, ordinary apps can't get it. See ConfigReceiver. -->
+        <receiver
+            android:name=".ConfigReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.gathin.tvbridge.CONFIGURE" />
+                <action android:name="com.gathin.tvbridge.SYNC" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name=".HistoryProvider"
+            android:authorities="com.gathin.tvbridge.history"
+            android:exported="true"
+            android:readPermission="com.gathin.tvbridge.permission.READ_HISTORY"
+            android:writePermission="com.gathin.tvbridge.permission.READ_HISTORY" />
+    </application>
+</manifest>

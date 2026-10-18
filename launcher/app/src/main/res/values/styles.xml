@@ -6,6 +6,19 @@
         <item name="android:windowAnimationStyle">@null</item>
     </style>
 
+    <!-- Round frosted button holding just an icon (search, settings). -->
+    <style name="TopIconButton">
+        <item name="android:layout_width">42dp</item>
+        <item name="android:layout_height">42dp</item>
+        <item name="android:layout_marginStart">10dp</item>
+        <item name="android:padding">11dp</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:background">@drawable/pill_bg</item>
+        <item name="android:tint">@drawable/pill_text</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+
     <!-- Frosted pill, tvOS style. -->
     <style name="TopButton">
         <item name="android:layout_width">wrap_content</item>
@@ -17,12 +30,41 @@
         <item name="android:background">@drawable/pill_bg</item>
         <item name="android:textColor">@drawable/pill_text</item>
         <item name="android:textSize">15sp</item>
-        <item name="android:fontFamily">@font/outfit</item>
+        <item name="android:fontFamily">@font/manrope</item>
         <item name="android:fontVariationSettings">\'wght\' 500</item>
         <item name="android:letterSpacing">0.01</item>
         <item name="android:drawablePadding">9dp</item>
         <item name="android:drawableTint">@drawable/pill_text</item>
         <item name="android:focusable">true</item>
         <item name="android:clickable">true</item>
+    </style>
+
+    <!-- A row of the launcher settings dialog: a focusable pill with an icon and a label. -->
+    <style name="SettingsRow" parent="TopButton">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:layout_marginStart">0dp</item>
+        <item name="android:layout_marginBottom">8dp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+    </style>
+
+    <style name="SettingsRowIcon">
+        <item name="android:layout_width">20dp</item>
+        <item name="android:layout_height">20dp</item>
+        <item name="android:tint">@drawable/pill_text</item>
+        <item name="android:duplicateParentState">true</item>
+        <item name="android:contentDescription">@null</item>
+    </style>
+
+    <style name="SettingsRowText">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginStart">12dp</item>
+        <item name="android:textColor">@drawable/pill_text</item>
+        <item name="android:duplicateParentState">true</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">@font/manrope</item>
     </style>
 </resources>

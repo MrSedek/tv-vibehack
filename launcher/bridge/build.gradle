@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Same key as the launcher: the history provider is behind a signature permission.
+def keystore = System.getenv('TVHOME_KEYSTORE')
+
+android {
+    namespace 'com.gathin.tvbridge'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.gathin.tvbridge'
+        minSdk 26
+        targetSdk 29
+        versionCode 2
+        versionName '1.1'
+    }
+
+    signingConfigs {
+        if (keystore) {
+            release {
+                storeFile file(keystore)
+                storePassword System.getenv('TVHOME_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('TVHOME_KEY_ALIAS') ?: 'tvhome'
+                keyPassword System.getenv('TVHOME_KEY_PASSWORD') ?: System.getenv('TVHOME_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (keystore) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        // Sideloaded over adb, never on Google Play; targetSdk 29 keeps the package-visibility rules of
+        // Android 10, which the launcher's app list and the bridge's resume intents rely on.
+        disable 'ExpiredTargetSdkVersion'
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

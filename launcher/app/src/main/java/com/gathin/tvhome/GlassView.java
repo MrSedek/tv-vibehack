@@ -4,15 +4,17 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.util.AttributeSet;
 import android.view.View;
 
 /**
- * A translucent glass slab: soft sheen fill, bright top specular, crisp rim and a faint outer glow.
- * One instance floats over the grid and is moved with spring animations between tiles.
+ * High-performance translucent glass highlight:
+ * - Fluid VisionOS/tvOS glass sheen
+ * - Crisp specular rim highlight
+ * - Outer glow without expensive software clipPath or multiple canvas overdraws
+ * - Optimized for Mali-G31 / Cortex-A35 GPU hardware rendering pipeline.
  */
 public class GlassView extends View {
 
@@ -21,7 +23,8 @@ public class GlassView extends View {
     private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
-    private final Path clip = new Path();
+    private final RectF glowRect = new RectF();
+    private final RectF specularRect = new RectF();
     private final float density;
     private float radius;
 
@@ -29,46 +32,65 @@ public class GlassView extends View {
         super(context, attrs);
         density = getResources().getDisplayMetrics().density;
         radius = 20f * density;
+
+        // Hardware-accelerated rendering
+        setLayerType(LAYER_TYPE_HARDWARE, null);
+
         rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(1.5f * density);
-        rim.setColor(0xCCFFFFFF);
+        rim.setStrokeWidth(1.2f * density);
+        rim.setColor(0xE6FFFFFF);
+
         glow.setStyle(Paint.Style.STROKE);
+        glow.setStrokeWidth(3.5f * density);
+        glow.setColor(0x28FFFFFF);
     }
 
     void setRadius(float px) {
-        radius = px;
-        invalidate();
+        if (Math.abs(radius - px) > 0.5f) {
+            radius = px;
+            invalidate();
+        }
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        fill.setShader(new LinearGradient(0, 0, 0, h, 0x3DFFFFFF, 0x12FFFFFF, Shader.TileMode.CLAMP));
-        specular.setShader(new LinearGradient(0, 0, 0, h * 0.45f, 0x66FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+        if (w <= 0 || h <= 0) return;
+
+        // Soft glass gradient: luminous at top, airy translucent at bottom
+        fill.setShader(new LinearGradient(
+                0, 0, 0, h,
+                new int[]{0x3AFFFFFF, 0x14FFFFFF, 0x0AFFFFFF},
+                new float[]{0f, 0.45f, 1f},
+                Shader.TileMode.CLAMP
+        ));
+
+        // Specular sheen for top half of tile
+        specular.setShader(new LinearGradient(
+                0, 0, 0, h * 0.40f,
+                0x4DFFFFFF, 0x00FFFFFF,
+                Shader.TileMode.CLAMP
+        ));
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
-        float inset = 6f * density;   // room for the glow
+        float inset = 5f * density;
         rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
 
-        // Outer glow: three widening, fading strokes.
-        for (int i = 1; i <= 3; i++) {
-            glow.setStrokeWidth(i * 2f * density);
-            glow.setColor((0x30 / i) << 24 | 0xFFFFFF);
-            float o = i * density;
-            canvas.drawRoundRect(rect.left - o, rect.top - o, rect.right + o, rect.bottom + o, radius + o, radius + o, glow);
-        }
+        // 1. Single soft ambient outer glow pass (replaces 3 heavy overdraw loops)
+        glowRect.set(rect.left - 1.5f * density, rect.top - 1.5f * density,
+                rect.right + 1.5f * density, rect.bottom + 1.5f * density);
+        canvas.drawRoundRect(glowRect, radius + 1.5f * density, radius + 1.5f * density, glow);
 
+        // 2. Translucent glass substrate
         canvas.drawRoundRect(rect, radius, radius, fill);
 
-        clip.reset();
-        clip.addRoundRect(rect, radius, radius, Path.Direction.CW);
-        canvas.save();
-        canvas.clipPath(clip);
-        canvas.drawRect(rect.left, rect.top, rect.right, rect.top + rect.height() * 0.45f, specular);
-        canvas.restore();
+        // 3. Specular upper highlight without expensive clipPath
+        specularRect.set(rect.left, rect.top, rect.right, rect.top + rect.height() * 0.40f);
+        canvas.drawRoundRect(specularRect, radius, radius, specular);
 
+        // 4. Razor-sharp glass rim
         canvas.drawRoundRect(rect, radius, radius, rim);
     }
 }

@@ -16,4 +16,17 @@
     <string name="good_night">Good night</string>
     <string name="ethernet">Ethernet</string>
     <string name="offline">Offline</string>
+
+    <!-- Context Menu & TV Remote actions -->
+    <string name="pin_to_dock">Pin to Dock</string>
+    <string name="unpin_from_dock">Unpin from Dock</string>
+    <string name="move_left">Move Left</string>
+    <string name="move_right">Move Right</string>
+    <string name="hide_app">Hide App</string>
+    <string name="app_info">App Info</string>
+    <string name="app_options">Options</string>
+    <string name="hidden_apps_title">Hidden Apps</string>
+    <string name="unhide_all">Restore All Hidden</string>
+    <string name="unhide">Unhide</string>
+    <string name="cant_open">Can\'t open</string>
 </resources>

@@ -1,0 +1,42 @@
+# Xiaomi TV Stick 4K (MDZ-27-AA, codename aquaman), Android TV 11
+# SoC: Amlogic S905Y4, 2 GB RAM, 8 GB Flash.
+#
+# Apply:   TV_HOST=<tv ip> tools/disable.sh examples/xiaomi-mi-stick-4k/debloat.txt
+# Undo:    TV_HOST=<tv ip> tools/restore.sh examples/xiaomi-mi-stick-4k/debloat.txt
+#
+# Everything is DISABLED (pm disable-user --user 0), never uninstalled.
+# Reversible at any time.
+
+# --- Xiaomi Telemetry & Tracking ---
+com.miui.tv.analytics
+com.xiaomi.statistic
+
+# --- PatchWall, Promotion Rows & Ad Providers ---
+com.mitv.tvhome.atv
+com.mitv.tvhome.michannel
+com.mitv.tvhome.mitvplus
+com.xm.webcontent
+com.xiaomi.floatingframe
+
+# --- Xiaomi Background Services ---
+com.xiaomi.mitv.tvmanager              # "TV Manager" RAM cleaner (causes frequent background wakeups)
+com.xiaomi.mitv.smartshare
+com.mitv.milinkservice                 # Mi Cast duplicate (Chromecast continues working natively)
+com.xiaomi.mitv.updateservice          # Update checker; re-enable when checking for system updates
+com.xiaomi.amazon.alexa                # Alexa voice service
+android.autoinstalls.config.xiaomi.aquaman
+android.autoinstalls.config.xiaomi.amelie
+
+# --- Preloaded Apps & Bloat ---
+com.xiaomi.mimusic2                    # Mi Music
+com.google.android.play.games          # Google Play Games
+com.google.android.feedback            # Feedback agent
+com.google.android.apps.tachyon        # Google Duo / Meet
+com.google.android.videos              # Google TV Movies (deprecated / bloat)
+fusion.android.tv.demo                 # Store retail demo app
+
+# --- Stock Google TV Launcher & Heavy Recommendations ---
+# (Disabling these frees up ~200-250 MB RAM on the S905Y4)
+com.google.android.tvlauncher
+com.google.android.tvrecommendations
+com.google.android.leanbacklauncher.recommendations

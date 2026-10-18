@@ -12,8 +12,12 @@ import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
+import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -28,23 +32,25 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * App tiles. The first {@link MainActivity#COLUMNS} positions are the pinned dock (favourites, fixed order),
- * the rest is alphabetical.
+ * App tiles with category filtering, asynchronous palette calculation,
+ * TV-first context menu, and adaptive generative cards.
  */
 public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
 
+    public enum Category { ALL, MEDIA, TOOLS }
+
     interface TileListener {
         void onTileFocused(int position, View card);
-
-        /** Called for D-pad Up/Down on a tile. Return true when handled. */
         boolean onTileVerticalKey(int position, int keyCode);
+        void onTileLongClicked(int position, View card, Entry entry);
+        void onAmbientColorReady(int position, int color);
     }
 
     static final class Entry {
@@ -69,24 +75,47 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     private final Context ctx;
     private final TileListener listener;
     private final int dockSize;
-    /** Dock order (res/values/config.xml, dock_apps). */
-    private final List<String> favourites;
-    /** Never shown as tiles (res/values/config.xml, hidden_apps). */
-    private final Set<String> hidden;
+    private final AppPreferences preferences;
+    private final List<Entry> allItems = new ArrayList<>();
     private final List<Entry> items = new ArrayList<>();
+    private final float density;
+    private Category currentCategory = Category.ALL;
+
+    // Background thread pool and memory cache for non-blocking color calculation
+    private final LruCache<String, Integer> colorCache = new LruCache<>(80);
+    private final ExecutorService executor = Executors.newFixedThreadPool(2);
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     AppAdapter(Context ctx, TileListener listener, int dockSize) {
         this.ctx = ctx;
         this.listener = listener;
         this.dockSize = dockSize;
-        this.favourites = Arrays.asList(ctx.getResources().getStringArray(R.array.dock_apps));
-        this.hidden = new HashSet<>(Arrays.asList(ctx.getResources().getStringArray(R.array.hidden_apps)));
+        this.preferences = new AppPreferences(ctx);
+        this.density = ctx.getResources().getDisplayMetrics().density;
+    }
+
+    AppPreferences getPreferences() {
+        return preferences;
+    }
+
+    public void setCategory(Category category) {
+        if (this.currentCategory == category) return;
+        this.currentCategory = category;
+        applyCategoryFilter();
+    }
+
+    public Category getCategory() {
+        return currentCategory;
     }
 
     void reload() {
         PackageManager pm = ctx.getPackageManager();
         Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
         List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
+
+        List<String> favourites = preferences.getDockApps();
+        Set<String> hidden = preferences.getHiddenApps();
+
         List<Entry> fresh = new ArrayList<>();
         for (ResolveInfo ri : found) {
             if (ri.activityInfo == null) continue;
@@ -98,6 +127,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             String label = String.valueOf(ri.loadLabel(pm));
             fresh.add(new Entry(label, new ComponentName(pkg, ri.activityInfo.name), banner, icon));
         }
+
         Collections.sort(fresh, (a, b) -> {
             int fa = favourites.indexOf(a.pkg), fb = favourites.indexOf(b.pkg);
             if (fa >= 0 || fb >= 0) {
@@ -107,9 +137,69 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             }
             return a.label.compareToIgnoreCase(b.label);
         });
+
+        allItems.clear();
+        allItems.addAll(fresh);
+
+        applyCategoryFilter();
+        prefetchColors();
+    }
+
+    private void applyCategoryFilter() {
         items.clear();
-        items.addAll(fresh);
+        if (currentCategory == Category.ALL) {
+            items.addAll(allItems);
+        } else if (currentCategory == Category.MEDIA) {
+            // Keep dock items + media apps
+            for (int i = 0; i < allItems.size(); i++) {
+                Entry e = allItems.get(i);
+                if (i < dockSize || isMediaApp(e)) {
+                    items.add(e);
+                }
+            }
+        } else if (currentCategory == Category.TOOLS) {
+            for (int i = 0; i < allItems.size(); i++) {
+                Entry e = allItems.get(i);
+                if (i < dockSize || isToolApp(e)) {
+                    items.add(e);
+                }
+            }
+        }
         notifyDataSetChanged();
+    }
+
+    private boolean isMediaApp(Entry e) {
+        String p = (e.pkg + " " + e.label).toLowerCase();
+        return p.contains("tube") || p.contains("video") || p.contains("tv") || p.contains("kino") ||
+                p.contains("media") || p.contains("lampa") || p.contains("vimu") || p.contains("cinema") ||
+                p.contains("netflix") || p.contains("rezka") || p.contains("film") || p.contains("movie") ||
+                p.contains("prime") || p.contains("zona") || p.contains("show") || p.contains("hd");
+    }
+
+    private boolean isToolApp(Entry e) {
+        String p = (e.pkg + " " + e.label).toLowerCase();
+        return p.contains("torr") || p.contains("setting") || p.contains("file") || p.contains("tool") ||
+                p.contains("browser") || p.contains("cleaner") || p.contains("speed") || p.contains("manager") ||
+                p.contains("input") || p.contains("ime") || p.contains("remote");
+    }
+
+    private void prefetchColors() {
+        executor.execute(() -> {
+            for (int i = 0; i < allItems.size(); i++) {
+                final int pos = i;
+                if (pos >= allItems.size()) break;
+                Entry e = allItems.get(pos);
+                if (e.ambient != 0) continue;
+                Integer cached = colorCache.get(e.pkg);
+                if (cached != null) {
+                    e.ambient = cached;
+                    continue;
+                }
+                int color = vividColor(e.banner != null ? e.banner : e.icon);
+                colorCache.put(e.pkg, color);
+                e.ambient = color;
+            }
+        });
     }
 
     @NonNull
@@ -123,36 +213,36 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     public void onBindViewHolder(@NonNull Holder h, int position) {
         Entry e = items.get(position);
         h.name.setText(e.label);
-        h.name.setVisibility(position < dockSize ? View.INVISIBLE : View.VISIBLE);   // the dock has no labels
+        h.name.setVisibility(position < dockSize ? View.INVISIBLE : View.VISIBLE);
         h.name.setAlpha(0f);
         h.card.setScaleX(1f);
         h.card.setScaleY(1f);
+
         if (e.banner != null) {
             h.banner.setImageDrawable(e.banner);
             h.banner.setVisibility(View.VISIBLE);
-            h.icon.setVisibility(View.GONE);
-            h.label.setVisibility(View.GONE);
+            h.fallbackContainer.setVisibility(View.GONE);
         } else {
-            h.banner.setImageDrawable(null);
             h.banner.setVisibility(View.GONE);
+            h.fallbackContainer.setVisibility(View.VISIBLE);
             h.icon.setImageDrawable(e.icon);
-            h.icon.setVisibility(View.VISIBLE);
             h.label.setText(e.label);
-            h.label.setVisibility(View.VISIBLE);
+
+            int color = ambientColorAt(position);
+            int topColor = 0x50000000 | (color & 0x00FFFFFF);
+            int bottomColor = 0xFF141418;
+            GradientDrawable gd = new GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{topColor, bottomColor}
+            );
+            gd.setCornerRadius(16f * density);
+            h.fallbackBg.setBackground(gd);
         }
+
         h.card.setOnClickListener(v -> launch(e));
-        h.card.setOnLongClickListener(v -> {
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + e.pkg));
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            try {
-                ctx.startActivity(i);
-            } catch (ActivityNotFoundException ignored) {
-            }
-            return true;
-        });
     }
 
-    private void launch(Entry e) {
+    public void launch(Entry e) {
         Intent i = new Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
                 .setComponent(e.component)
@@ -160,7 +250,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         try {
             ctx.startActivity(i);
         } catch (Exception ex) {
-            Toast.makeText(ctx, "Can't open " + e.label, Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, ctx.getString(R.string.cant_open) + " " + e.label, Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -169,63 +259,89 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         return items.size();
     }
 
+    Entry getEntry(int position) {
+        return position >= 0 && position < items.size() ? items.get(position) : null;
+    }
+
     String labelAt(int position) {
         return position >= 0 && position < items.size() ? items.get(position).label : "";
     }
 
-    /** A vivid colour sampled from the app's banner (or icon), cached per entry. */
     int ambientColorAt(int position) {
-        if (position < 0 || position >= items.size()) return 0xFF444444;
+        if (position < 0 || position >= items.size()) return 0xFF3D3D3D;
         Entry e = items.get(position);
-        if (e.ambient == 0) e.ambient = vividColor(e.banner != null ? e.banner : e.icon);
-        return e.ambient;
+        if (e.ambient != 0) return e.ambient;
+
+        Integer cached = colorCache.get(e.pkg);
+        if (cached != null) {
+            e.ambient = cached;
+            return cached;
+        }
+
+        executor.execute(() -> {
+            int computed = vividColor(e.banner != null ? e.banner : e.icon);
+            colorCache.put(e.pkg, computed);
+            e.ambient = computed;
+            mainHandler.post(() -> {
+                if (listener != null) {
+                    listener.onAmbientColorReady(position, computed);
+                }
+            });
+        });
+
+        return 0xFF3A3A3C;
     }
 
     private static int vividColor(Drawable live) {
-        if (live == null) return 0xFF444444;
-        // Draw a private copy: changing the bounds of the drawable an ImageView shows would blank the tile.
-        Drawable d = live.getConstantState() != null ? live.getConstantState().newDrawable().mutate() : live;
-        Rect saved = new Rect(d.getBounds());
-        int n = 12;
-        Bitmap bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(bmp);
-        d.setBounds(0, 0, n, n);
-        d.draw(c);
-        d.setBounds(saved);
-        float[] hsv = new float[3];
-        int best = 0xFF444444;
-        float bestScore = -1f;
-        long r = 0, g = 0, b = 0;
-        for (int y = 0; y < n; y++) {
-            for (int x = 0; x < n; x++) {
-                int p = bmp.getPixel(x, y);
-                r += Color.red(p);
-                g += Color.green(p);
-                b += Color.blue(p);
-                Color.colorToHSV(p, hsv);
-                float score = hsv[1] * Math.min(1f, hsv[2] * 1.4f);   // saturated and not too dark
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = p;
+        if (live == null) return 0xFF3D3D3D;
+        try {
+            Drawable d = live.getConstantState() != null ? live.getConstantState().newDrawable().mutate() : live;
+            Rect saved = new Rect(d.getBounds());
+            int n = 12;
+            Bitmap bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            d.setBounds(0, 0, n, n);
+            d.draw(c);
+            d.setBounds(saved);
+            float[] hsv = new float[3];
+            int best = 0xFF444444;
+            float bestScore = -1f;
+            long r = 0, g = 0, b = 0;
+            for (int y = 0; y < n; y++) {
+                for (int x = 0; x < n; x++) {
+                    int p = bmp.getPixel(x, y);
+                    r += Color.red(p);
+                    g += Color.green(p);
+                    b += Color.blue(p);
+                    Color.colorToHSV(p, hsv);
+                    float score = hsv[1] * Math.min(1f, hsv[2] * 1.4f);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = p;
+                    }
                 }
             }
-        }
-        bmp.recycle();
-        if (bestScore < 0.25f) {   // nearly monochrome banner (e.g. white): use its average, lifted
-            int avg = Color.rgb((int) (r / (n * n)), (int) (g / (n * n)), (int) (b / (n * n)));
-            Color.colorToHSV(avg, hsv);
-            hsv[2] = Math.max(hsv[2], 0.55f);
+            bmp.recycle();
+            if (bestScore < 0.25f) {
+                int avg = Color.rgb((int) (r / (n * n)), (int) (g / (n * n)), (int) (b / (n * n)));
+                Color.colorToHSV(avg, hsv);
+                hsv[2] = Math.max(hsv[2], 0.55f);
+                return Color.HSVToColor(hsv);
+            }
+            Color.colorToHSV(best, hsv);
+            hsv[1] = Math.min(1f, hsv[1] * 1.1f);
+            hsv[2] = Math.max(0.5f, hsv[2]);
             return Color.HSVToColor(hsv);
+        } catch (Throwable ignored) {
+            return 0xFF444444;
         }
-        Color.colorToHSV(best, hsv);
-        hsv[1] = Math.min(1f, hsv[1] * 1.1f);
-        hsv[2] = Math.max(0.5f, hsv[2]);
-        return Color.HSVToColor(hsv);
     }
 
     static final class Holder extends RecyclerView.ViewHolder {
         final View card;
         final ImageView banner;
+        final View fallbackContainer;
+        final View fallbackBg;
         final ImageView icon;
         final TextView label;
         final TextView name;
@@ -234,6 +350,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             super(v);
             card = v.findViewById(R.id.card);
             banner = v.findViewById(R.id.banner);
+            fallbackContainer = v.findViewById(R.id.fallbackContainer);
+            fallbackBg = v.findViewById(R.id.fallbackBg);
             icon = v.findViewById(R.id.icon);
             label = v.findViewById(R.id.label);
             name = v.findViewById(R.id.name);
@@ -250,9 +368,38 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
 
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
-                if (keyCode != KeyEvent.KEYCODE_DPAD_UP && keyCode != KeyEvent.KEYCODE_DPAD_DOWN) return false;
                 int pos = getBindingAdapterPosition();
-                return listener != null && pos != RecyclerView.NO_POSITION && listener.onTileVerticalKey(pos, keyCode);
+                if (pos == RecyclerView.NO_POSITION || listener == null) return false;
+
+                if (keyCode == KeyEvent.KEYCODE_MENU) {
+                    AppAdapter adapter = (AppAdapter) getBindingAdapter();
+                    if (adapter != null) {
+                        Entry entry = adapter.getEntry(pos);
+                        if (entry != null) {
+                            listener.onTileLongClicked(pos, view, entry);
+                            return true;
+                        }
+                    }
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    return listener.onTileVerticalKey(pos, keyCode);
+                }
+                return false;
+            });
+
+            card.setOnLongClickListener(view -> {
+                int pos = getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION && listener != null) {
+                    AppAdapter adapter = (AppAdapter) getBindingAdapter();
+                    if (adapter != null) {
+                        Entry entry = adapter.getEntry(pos);
+                        if (entry != null) {
+                            listener.onTileLongClicked(pos, view, entry);
+                            return true;
+                        }
+                    }
+                }
+                return false;
             });
 
             card.setOnFocusChangeListener((view, focused) -> {

@@ -30,6 +30,7 @@ step with screenshots from the TV. If you'd rather do it by hand, the pieces are
 |---|---|
 | [`PROMPT.md`](PROMPT.md) | The prompt. Brand-neutral; the assistant discovers your TV's bloat. |
 | [`launcher/`](launcher/) | The tvOS-style launcher. Edit `app/src/main/res/values/config.xml` for your dock, hidden apps and Live TV package, then run `build-and-install.sh`. |
+| [`launcher/bridge/`](launcher/bridge/) | Companion app that records where you paused in your players, for the launcher's continue-watching shelf. |
 | [`tools/tv.py`](tools/tv.py) | Pure-Python ADB client (shell, batch, push, pull). Works where the stock `adb` is blocked. |
 | [`tools/b64push.py`](tools/b64push.py) | Uploads larger files (APKs) as base64 chunks with an md5 check. |
 | [`tools/disable.sh`](tools/disable.sh), [`tools/restore.sh`](tools/restore.sh) | Apply or undo a debloat list. |
@@ -61,6 +62,37 @@ TV_HOST=192.168.1.50 launcher/build-and-install.sh
 Needs JDK 17 and the Android SDK (platform 34, build-tools 34.0.0). On macOS:
 `brew install openjdk@17 android-commandlinetools && sdkmanager "platforms;android-34" "build-tools;34.0.0"`.
 
+### Continue watching
+
+The shelf under the clock shows where you stopped in your players: thumbnail, title and progress.
+Select a card to pick up where you left off; long-press it to remove it. The shelf stays hidden
+until there is something to continue.
+
+Android TV's own "Play next" row can only be read by the system launcher, so a small companion
+app records it instead: the bridge (`com.gathin.tvbridge`, in [`launcher/bridge/`](launcher/bridge/)).
+As an enabled notification listener it may watch other apps' media sessions, and it takes a
+snapshot on every pause and whenever a player closes its session. That keeps the launcher itself
+free of background services; the bridge goes online only to fetch the thumbnail of what you
+paused (and, for YouTube, its title).
+
+`build-and-install.sh` installs the bridge first and enables it with
+`cmd notification allow_listener com.gathin.tvbridge/com.gathin.tvbridge.MediaWatchService`;
+`BRIDGE=0` skips it. The launcher reads the history through a content provider guarded by a
+signature permission, so both APKs must be signed with the same key (debug builds from one machine
+are). The watched players are listed in
+[`launcher/bridge/src/main/res/values/config.xml`](launcher/bridge/src/main/res/values/config.xml).
+What each reports, as tested on a Xiaomi TV Stick 4K:
+
+| Player | Shelf card | Selecting it |
+|---|---|---|
+| SmartTube | Title, channel, thumbnail, progress | Reopens the video at the saved second |
+| VK Video | Progress only, no title | Opens VK, which shows its own "continue" row |
+| Jellyfin | Nothing: its video player leaves the media session empty | — |
+| HDrezka (AstroApps) | Nothing: no media session at all | — |
+
+A player that doesn't report what it plays can't appear; for Jellyfin, its server API would be the
+way in.
+
 ## Talking to the TV by hand
 
 ```bash
@@ -78,6 +110,9 @@ tools/restore.sh examples/xiaomi-mi-tv-4a/debloat.txt        # undo it, restore 
 - **macOS: `adb connect` says "No route to host"** while the port is clearly open. Recent macOS
   treats the Google-signed `adb` as its own app under Local Network privacy and silently blocks it.
   `tools/tv.py` avoids the binary entirely.
+- **`tools/tv.py` gets "No route to host" too** when the venv was made with a third-party Python
+  build (PlatformIO's, for one) that Local Network privacy blocks the same way. Create the venv with
+  Apple's or Homebrew's `python3`.
 - **No "wireless debugging" toggle** on some TVs (Xiaomi among them). USB debugging alone opens
   network ADB on port 5555.
 - **Chained `pm` commands** (`pm disable a; pm disable b`) may silently stop after the first. Run

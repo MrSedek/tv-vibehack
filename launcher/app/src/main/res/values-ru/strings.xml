@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="resume_from">Продолжить с %1$s</string>
+    <string name="remove_from_shelf">Убрать из «Продолжить»</string>
+</resources>

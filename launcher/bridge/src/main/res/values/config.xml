@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Bridge configuration. Players listed here are watched for the continue-watching shelf.
+  Only apps that report what they play to Android (a media session) can appear; see README.
+-->
+<resources>
+    <string name="app_name" translatable="false">Home Bridge</string>
+
+    <string-array name="watched_apps">
+        <item>org.smarttube.beta</item>
+        <item>com.teamsmart.videomanager.tv</item>
+        <item>com.vk.tv</item>
+    </string-array>
+
+    <!-- SmartTube builds: resumed by opening youtube.com/watch?v=<id>&t=<seconds>s in the same app. -->
+    <string-array name="youtube_apps">
+        <item>org.smarttube.beta</item>
+        <item>com.teamsmart.videomanager.tv</item>
+    </string-array>
+</resources>

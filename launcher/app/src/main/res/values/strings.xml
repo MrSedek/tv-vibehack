@@ -29,4 +29,8 @@
     <string name="unhide_all">Restore All Hidden</string>
     <string name="unhide">Unhide</string>
     <string name="cant_open">Can\'t open</string>
+
+    <!-- Continue watching shelf -->
+    <string name="resume_from">Resume from %1$s</string>
+    <string name="remove_from_shelf">Remove from Continue Watching</string>
 </resources>

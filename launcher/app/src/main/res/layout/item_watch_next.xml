@@ -21,6 +21,23 @@
             android:layout_height="match_parent"
             android:background="#1A1A22" />
 
+        <!-- Thumbnail from the bridge, when the player reported one -->
+        <ImageView
+            android:id="@+id/thumb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            android:contentDescription="@null" />
+
+        <View
+            android:id="@+id/scrim"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:layout_gravity="bottom"
+            android:background="@drawable/shelf_scrim"
+            android:visibility="gone" />
+
         <!-- Source badge (e.g., SmartTube, Kinopoisk) -->
         <TextView
             android:id="@+id/badge"
@@ -32,8 +49,8 @@
             android:paddingEnd="8dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp"
-            android:background="@drawable/pill_bg"
-            android:textColor="#CCFFFFFF"
+            android:background="@drawable/shelf_badge_bg"
+            android:textColor="#E6FFFFFF"
             android:textSize="10sp"
             android:fontFamily="@font/outfit"
             android:fontVariationSettings="'wght' 500"

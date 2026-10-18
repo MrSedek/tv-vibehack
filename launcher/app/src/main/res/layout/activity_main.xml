@@ -167,12 +167,13 @@
             </LinearLayout>
         </RelativeLayout>
 
-        <!-- Continue Watching Shelf Section -->
+        <!-- Continue Watching Shelf Section; hidden until the bridge or VibeBridge has something to continue. -->
         <LinearLayout
             android:id="@+id/layoutWatchNext"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
+            android:visibility="gone"
             android:layout_marginTop="6dp">
 
             <TextView

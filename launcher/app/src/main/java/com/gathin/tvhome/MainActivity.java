@@ -5,6 +5,7 @@ import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.database.ContentObserver;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
@@ -88,6 +89,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private RecyclerView listWatchNext;
     private WatchNextAdapter watchNextAdapter;
     private boolean showWatchNext = true;
+    private ContentObserver bridgeObserver;
 
     // Category Tabs
     private TextView tabAll, tabMedia, tabTools;
@@ -133,13 +135,20 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         listWatchNext = findViewById(R.id.listWatchNext);
         listWatchNext.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
         watchNextAdapter = new WatchNextAdapter(this, item -> watchNextAdapter.launch(item));
+        watchNextAdapter.setOnItemLongClickListener(this::showShelfItemMenu);
         listWatchNext.setAdapter(watchNextAdapter);
+        bridgeObserver = new ContentObserver(handler) {
+            @Override
+            public void onChange(boolean selfChange) {
+                refreshWatchNext();
+            }
+        };
 
         // Start VibeBridge local server (port 8989)
         bridgeServer = new VibeBridgeServer(this, item -> {
             if (watchNextAdapter != null) {
                 watchNextAdapter.addItem(item);
-                if (layoutWatchNext != null) layoutWatchNext.setVisibility(View.VISIBLE);
+                if (layoutWatchNext != null && showWatchNext) layoutWatchNext.setVisibility(View.VISIBLE);
             }
         });
         bridgeServer.start();
@@ -288,7 +297,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         heroName.setAlpha(0f);
         ambient.setAlpha(0f);
         adapter.reload();
-        if (watchNextAdapter != null) watchNextAdapter.reload();
+        refreshWatchNext();
+        try {
+            // Picks up the pause the bridge records just after you press Home.
+            getContentResolver().registerContentObserver(WatchNextManager.BRIDGE_ITEMS, false, bridgeObserver);
+        } catch (SecurityException e) {
+            // Bridge not installed.
+        }
         grid.scheduleLayoutAnimation();
         updateGreeting();
         updateWifiLabel();
@@ -314,6 +329,40 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(minuteTick);
+        getContentResolver().unregisterContentObserver(bridgeObserver);
+    }
+
+    /** Reloads the shelf and shows it only when it has something to continue. */
+    private void refreshWatchNext() {
+        watchNextAdapter.reload();
+        boolean show = showWatchNext && watchNextAdapter.getItemCount() > 0;
+        layoutWatchNext.setVisibility(show ? View.VISIBLE : View.GONE);
+    }
+
+    private void showShelfItemMenu(WatchNextManager.WatchItem item, View card) {
+        View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        final PopupWindow popup = new PopupWindow(panel, (int) (260 * density), ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popup.setOutsideTouchable(true);
+        popup.setAnimationStyle(0);
+        addMenuRow(rows, popup, R.drawable.ic_hide, getString(R.string.remove_from_shelf), () -> {
+            if (item.fromBridge()) {
+                WatchNextManager.removeBridgeItem(this, item);
+            } else {
+                WatchNextManager.removeItem(this, watchNextAdapter.localIndexOf(item));
+            }
+            refreshWatchNext();
+            listWatchNext.post(() -> {
+                if (layoutWatchNext.getVisibility() == View.VISIBLE && listWatchNext.getChildCount() > 0) {
+                    listWatchNext.getChildAt(0).findViewById(R.id.card).requestFocus();
+                } else {
+                    focusTile(lastFocused);
+                }
+            });
+        });
+        popup.showAsDropDown(card, 0, (int) (8 * density), Gravity.START);
+        rows.getChildAt(0).requestFocus();
     }
 
     @Override
@@ -379,12 +428,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int color = adapter.ambientColorAt(position);
         float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
+        float heroAlpha = y >= heroMinY() ? 1f : 0f;
 
         if (!heroShown) {
             heroName.setText(label);
             heroName.setY(y);
             heroName.setTranslationX(0f);
-            heroName.animate().alpha(1f).setDuration(260).start();
+            heroName.animate().alpha(heroAlpha).setDuration(260).start();
             setAmbient(color);
             ambient.animate().alpha(1f).setDuration(600).start();
             heroShown = true;
@@ -393,7 +443,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 heroName.setText(label);
                 heroName.setY(y);
                 heroName.setTranslationX(12 * density);
-                heroName.animate().alpha(1f).translationX(0f).setDuration(200).start();
+                heroName.animate().alpha(heroAlpha).translationX(0f).setDuration(200).start();
             }).start();
             if (color != ambientColor) {
                 ambient.animate().alpha(0.35f).setDuration(200).withEndAction(() -> {
@@ -403,7 +453,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         } else {
             heroName.setY(y);
+            heroName.animate().alpha(heroAlpha).setDuration(160).start();
         }
+    }
+
+    /** The hero name must stay below the category tabs (and the shelf above them). */
+    private float heroMinY() {
+        View cats = findViewById(R.id.layoutCategories);
+        Rect r = new Rect(0, 0, cats.getWidth(), cats.getHeight());
+        root.offsetDescendantRectToMyCoords(cats, r);
+        return r.bottom + 8 * density;
     }
 
     private void setAmbient(int color) {
@@ -563,7 +622,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         lblToggle.setText("Полка «Продолжить просмотр»: " + (showWatchNext ? "Вкл" : "Выкл"));
         dialog.findViewById(R.id.rowToggleWatchNext).setOnClickListener(v -> {
             showWatchNext = !showWatchNext;
-            layoutWatchNext.setVisibility(showWatchNext ? View.VISIBLE : View.GONE);
+            refreshWatchNext();
             lblToggle.setText("Полка «Продолжить просмотр»: " + (showWatchNext ? "Вкл" : "Выкл"));
         });
 

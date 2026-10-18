@@ -1,5 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">Домой</string>
+    <string name="inputs">Входы</string>
+    <string name="wifi">Wi-Fi</string>
+    <string name="settings">Настройки</string>
+    <string name="search">Поиск</string>
+    <string name="choose_input">Входы</string>
+    <string name="connected">Подключено</string>
+    <string name="standby">Ожидание</string>
+    <string name="not_connected">Нет устройства</string>
+    <string name="live_tv">Эфирное ТВ</string>
+    <string name="no_inputs">Входов не найдено</string>
+    <string name="good_morning">Доброе утро</string>
+    <string name="good_afternoon">Добрый день</string>
+    <string name="good_evening">Добрый вечер</string>
+    <string name="good_night">Доброй ночи</string>
+    <string name="ethernet">Ethernet</string>
+    <string name="offline">Нет сети</string>
+
+    <string name="pin_to_dock">Закрепить в доке</string>
+    <string name="unpin_from_dock">Убрать из дока</string>
+    <string name="move_left">Сдвинуть влево</string>
+    <string name="move_right">Сдвинуть вправо</string>
+    <string name="hide_app">Скрыть</string>
+    <string name="app_info">О приложении</string>
+    <string name="app_options">Действия</string>
+    <string name="hidden_apps_title">Скрытые приложения</string>
+    <string name="unhide_all">Вернуть все скрытые</string>
+    <string name="unhide">Вернуть</string>
+    <string name="cant_open">Не удалось открыть</string>
+
+    <string name="tab_all">Все</string>
+    <string name="tab_media">Кино и ТВ</string>
+    <string name="tab_tools">Утилиты</string>
+
+    <string name="continue_watching">Продолжить просмотр</string>
     <string name="resume_from">Продолжить с %1$s</string>
     <string name="remove_from_shelf">Убрать из «Продолжить»</string>
 </resources>

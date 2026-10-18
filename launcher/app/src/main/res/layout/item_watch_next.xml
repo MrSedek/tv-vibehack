@@ -11,6 +11,7 @@
         android:layout_width="190dp"
         android:layout_height="105dp"
         android:background="@drawable/tile_bg"
+        android:foreground="@drawable/shelf_focus_ring"
         android:focusable="true"
         android:clickable="true">
 
@@ -52,7 +53,7 @@
             android:background="@drawable/shelf_badge_bg"
             android:textColor="#E6FFFFFF"
             android:textSize="10sp"
-            android:fontFamily="@font/outfit"
+            android:fontFamily="@font/manrope"
             android:fontVariationSettings="'wght' 500"
             android:textAllCaps="true" />
 
@@ -79,7 +80,7 @@
             android:ellipsize="end"
             android:textColor="#FFFFFFFF"
             android:textSize="12sp"
-            android:fontFamily="@font/outfit"
+            android:fontFamily="@font/manrope"
             android:fontVariationSettings="'wght' 500" />
 
         <!-- Progress bar line at the bottom -->

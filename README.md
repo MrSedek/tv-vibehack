@@ -46,10 +46,12 @@ A small native Android TV home screen (`com.gathin.tvhome`), built for sets with
   Press Down and the dock slides up to reveal the rest of your apps in a grid.
 - One translucent glass highlight springs from tile to tile. The focused tile lifts and shows its
   name.
-- Frosted pills top right: **Inputs** (a dropdown of HDMI ports, AV and Live TV), **Wi-Fi**
-  (shows the network name) and **Settings**. Greeting, a large thin clock and the date top left,
-  set in [Outfit](https://fonts.google.com/specimen/Outfit).
+- Frosted buttons top right: search, **Wi-Fi** (shows the network name), settings, and **Inputs**
+  (a dropdown of HDMI ports, AV and Live TV) on TVs that have any. Greeting, a large thin clock and
+  the date top left. The clock is set in [Outfit](https://fonts.google.com/specimen/Outfit), the
+  rest in [Manrope](https://fonts.google.com/specimen/Manrope), which also covers Cyrillic.
 - Deterministic D-pad navigation, last focused tile remembered, staggered entrance animation.
+  Back and Home return to the dock.
   No blur, no video, no network, no background services.
 
 Configure it in [`launcher/app/src/main/res/values/config.xml`](launcher/app/src/main/res/values/config.xml):
@@ -64,9 +66,10 @@ Needs JDK 17 and the Android SDK (platform 34, build-tools 34.0.0). On macOS:
 
 ### Continue watching
 
-The shelf under the clock shows where you stopped in your players: thumbnail, title and progress.
-Select a card to pick up where you left off; long-press it to remove it. The shelf stays hidden
-until there is something to continue.
+The shelf right above the dock shows where you stopped in your players: thumbnail, title and
+progress. Press Up from the dock to reach it, select a card to pick up where you left off,
+long-press it to remove it. It stays hidden until there is something to continue, and while you
+browse the app grid.
 
 Android TV's own "Play next" row can only be read by the system launcher, so a small companion
 app records it instead: the bridge (`com.gathin.tvbridge`, in [`launcher/bridge/`](launcher/bridge/)).
@@ -138,5 +141,5 @@ Add your TV's debloat list, improve the launcher, or sharpen the prompt. See
 
 ## Licence
 
-MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font License, see
-`launcher/FONT-LICENSE-OFL.txt`.
+MIT, see [`LICENSE`](LICENSE). The Outfit and Manrope typefaces are under the SIL Open Font
+License, see `launcher/FONT-LICENSE-OFL.txt` and `launcher/FONT-LICENSE-OFL-Manrope.txt`.

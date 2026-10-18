@@ -15,7 +15,7 @@
         android:text="Настройки VibeHome"
         android:textColor="#FFFFFFFF"
         android:textSize="20sp"
-        android:fontFamily="@font/outfit"
+        android:fontFamily="@font/manrope"
         android:fontVariationSettings="'wght' 500"
         android:letterSpacing="-0.01" />
 
@@ -26,7 +26,7 @@
         android:text="Web Bridge: http://192.168.1.155:8989"
         android:textColor="#80FFFFFF"
         android:textSize="12sp"
-        android:fontFamily="@font/outfit"
+        android:fontFamily="@font/manrope"
         android:layout_marginTop="2dp"
         android:layout_marginBottom="16dp" />
 
@@ -51,7 +51,8 @@
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:src="@drawable/ic_ram"
-                android:tint="#FFFFFFFF"
+                android:tint="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:contentDescription="@null" />
 
             <TextView
@@ -61,9 +62,10 @@
                 android:layout_weight="1"
                 android:layout_marginStart="12dp"
                 android:text="Очистить оперативную память (RAM)"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:textSize="14sp"
-                android:fontFamily="@font/outfit" />
+                android:fontFamily="@font/manrope" />
         </LinearLayout>
 
         <!-- Toggle Watch Next Shelf -->
@@ -81,7 +83,8 @@
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:src="@drawable/ic_livetv"
-                android:tint="#FFFFFFFF"
+                android:tint="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:contentDescription="@null" />
 
             <TextView
@@ -91,9 +94,10 @@
                 android:layout_weight="1"
                 android:layout_marginStart="12dp"
                 android:text="Полка «Продолжить просмотр»: Вкл"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:textSize="14sp"
-                android:fontFamily="@font/outfit" />
+                android:fontFamily="@font/manrope" />
         </LinearLayout>
 
         <!-- Unhide All Apps -->
@@ -111,7 +115,8 @@
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:src="@drawable/ic_hide"
-                android:tint="#FFFFFFFF"
+                android:tint="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:contentDescription="@null" />
 
             <TextView
@@ -121,9 +126,10 @@
                 android:layout_weight="1"
                 android:layout_marginStart="12dp"
                 android:text="Восстановить скрытые приложения"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:textSize="14sp"
-                android:fontFamily="@font/outfit" />
+                android:fontFamily="@font/manrope" />
         </LinearLayout>
 
         <!-- Reset Dock to Defaults -->
@@ -141,7 +147,8 @@
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:src="@drawable/ic_move"
-                android:tint="#FFFFFFFF"
+                android:tint="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:contentDescription="@null" />
 
             <TextView
@@ -150,9 +157,10 @@
                 android:layout_weight="1"
                 android:layout_marginStart="12dp"
                 android:text="Сбросить порядок в Dock"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:textSize="14sp"
-                android:fontFamily="@font/outfit" />
+                android:fontFamily="@font/manrope" />
         </LinearLayout>
 
         <!-- Android System Settings -->
@@ -170,7 +178,8 @@
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:src="@drawable/ic_settings"
-                android:tint="#FFFFFFFF"
+                android:tint="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:contentDescription="@null" />
 
             <TextView
@@ -179,9 +188,10 @@
                 android:layout_weight="1"
                 android:layout_marginStart="12dp"
                 android:text="Системные настройки Android"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@drawable/pill_text"
+                android:duplicateParentState="true"
                 android:textSize="14sp"
-                android:fontFamily="@font/outfit" />
+                android:fontFamily="@font/manrope" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

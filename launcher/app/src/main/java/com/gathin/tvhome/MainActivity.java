@@ -5,6 +5,7 @@ import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.ContentObserver;
 import android.graphics.Color;
 import android.graphics.Rect;
@@ -23,7 +24,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
-import android.text.format.Formatter;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -77,11 +77,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean heroShown;
     private TextView greeting;
     private TextView btnWifi;
-    private TextView btnRam;
     private SpringAnimation springX, springY;
     private float glassTargetX, glassTargetY;
     private boolean glassShown;
     private int lastFocused = 0;
+    /** Last dock tile in focus; Back and Home return there. */
+    private int lastDockFocused = 0;
+    /** The grid sits at rest with the dock at the bottom (not scrolled into the app rows). */
+    private boolean dockParked = true;
     private float density;
 
     // Continue Watching shelf
@@ -90,6 +93,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private WatchNextAdapter watchNextAdapter;
     private boolean showWatchNext = true;
     private ContentObserver bridgeObserver;
+    private SharedPreferences uiPrefs;
 
     // Category Tabs
     private TextView tabAll, tabMedia, tabTools;
@@ -103,7 +107,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         public void run() {
             updateGreeting();
             updateWifiLabel();
-            updateRamLabel();
             handler.postDelayed(this, MINUTE_MS);
         }
     };
@@ -128,7 +131,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 ambientGlow.setGradientRadius((r - l) * 0.62f));
         greeting = findViewById(R.id.greeting);
         btnWifi = findViewById(R.id.btnWifi);
-        btnRam = findViewById(R.id.btnRam);
+        uiPrefs = getSharedPreferences("tvhome_ui", MODE_PRIVATE);
+        showWatchNext = uiPrefs.getBoolean("show_watch_next", true);
 
         // Continue Watching shelf setup
         layoutWatchNext = findViewById(R.id.layoutWatchNext);
@@ -148,7 +152,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         bridgeServer = new VibeBridgeServer(this, item -> {
             if (watchNextAdapter != null) {
                 watchNextAdapter.addItem(item);
-                if (layoutWatchNext != null && showWatchNext) layoutWatchNext.setVisibility(View.VISIBLE);
+                updateShelfVisibility();
             }
         });
         bridgeServer.start();
@@ -172,6 +176,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (grid.getPaddingTop() != want) {
                 grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
             }
+            grid.post(this::positionShelf);
+        });
+        layoutWatchNext.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (b - t != ob - ot) positionShelf();
         });
 
         grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
@@ -206,8 +214,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View btnSettings = findViewById(R.id.btnSettings);
 
         btnSearch.setOnClickListener(v -> launchSearch());
-        btnRam.setOnClickListener(v -> cleanRam());
         btnInputs.setOnClickListener(v -> showInputs());
+        // A dongle has no HDMI inputs or tuner: the pill would only say "No inputs found".
+        btnInputs.setVisibility(hasInputs() ? View.VISIBLE : View.GONE);
         btnWifi.setOnClickListener(v -> open(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         btnSettings.setOnClickListener(v -> showLauncherSettings());
 
@@ -219,13 +228,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == R.id.btnSettings;
         };
         btnSearch.setOnKeyListener(pillKeys);
-        btnRam.setOnKeyListener(pillKeys);
         btnInputs.setOnKeyListener(pillKeys);
         btnWifi.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
 
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
-            boolean onTile = newF != null && newF.getId() == R.id.card;
+            // Shelf cards share the tiles' "card" id; the glass belongs to grid tiles only.
+            boolean onTile = newF != null && newF.getId() == R.id.card && grid.findContainingViewHolder(newF) != null;
             if (!onTile) hideGlass();
         });
     }
@@ -268,24 +277,33 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 }
             }
             System.gc();
-            updateRamLabel();
-            Toast.makeText(this, "Память очищена! " + btnRam.getText(), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Память очищена! " + freeRamText(), Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Toast.makeText(this, "Очистка RAM выполнена", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void updateRamLabel() {
+    private String freeRamText() {
         try {
             ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
             ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
             if (am != null) {
                 am.getMemoryInfo(mi);
-                long freeMb = mi.availMem / (1024 * 1024);
-                btnRam.setText(freeMb + "M RAM");
+                return (mi.availMem / (1024 * 1024)) + "M RAM";
             }
         } catch (Exception ignored) {
         }
+        return "RAM";
+    }
+
+    private boolean hasInputs() {
+        TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
+        if (tim != null) {
+            for (TvInputInfo info : tim.getTvInputList()) {
+                if (info.isPassthroughInput()) return true;
+            }
+        }
+        return !liveTvPkg.isEmpty() && getPackageManager().getLeanbackLaunchIntentForPackage(liveTvPkg) != null;
     }
 
     @Override
@@ -307,7 +325,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.scheduleLayoutAnimation();
         updateGreeting();
         updateWifiLabel();
-        updateRamLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
 
         grid.post(() -> {
@@ -332,11 +349,51 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         getContentResolver().unregisterContentObserver(bridgeObserver);
     }
 
-    /** Reloads the shelf and shows it only when it has something to continue. */
+    /** Reloads the shelf and shows it when it has something to continue. */
     private void refreshWatchNext() {
         watchNextAdapter.reload();
-        boolean show = showWatchNext && watchNextAdapter.getItemCount() > 0;
-        layoutWatchNext.setVisibility(show ? View.VISIBLE : View.GONE);
+        updateShelfVisibility();
+    }
+
+    private boolean shelfHasItems() {
+        return showWatchNext && watchNextAdapter.getItemCount() > 0;
+    }
+
+    /** The shelf stands above the dock, so it goes away while the grid is scrolled into the app rows. */
+    private void updateShelfVisibility() {
+        boolean show = shelfHasItems() && dockParked;
+        int vis = show ? View.VISIBLE : (shelfHasItems() ? View.INVISIBLE : View.GONE);
+        if (layoutWatchNext.getVisibility() == vis) return;
+        if (show) {
+            layoutWatchNext.setAlpha(0f);
+            layoutWatchNext.setVisibility(View.VISIBLE);
+            layoutWatchNext.animate().alpha(1f).setDuration(220).start();
+        } else {
+            layoutWatchNext.animate().cancel();
+            layoutWatchNext.setVisibility(vis);
+        }
+    }
+
+    /**
+     * Puts the shelf right above the dock band (the grid's top padding is where the band starts).
+     * A layout margin, not a translation: D-pad focus search only sees layout positions.
+     */
+    private void positionShelf() {
+        if (layoutWatchNext.getHeight() == 0) return;
+        Rect r = new Rect(0, 0, grid.getWidth(), grid.getHeight());
+        root.offsetDescendantRectToMyCoords(grid, r);
+        int top = Math.round(r.top + grid.getPaddingTop() - 18 * density - layoutWatchNext.getHeight());
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) layoutWatchNext.getLayoutParams();
+        if (lp.topMargin != top) {
+            lp.topMargin = top;
+            layoutWatchNext.setLayoutParams(lp);
+        }
+    }
+
+    private void setDockParked(boolean parked) {
+        if (dockParked == parked) return;
+        dockParked = parked;
+        updateShelfVisibility();
     }
 
     private void showShelfItemMenu(WatchNextManager.WatchItem item, View card) {
@@ -367,6 +424,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public void onBackPressed() {
+        focusTile(lastDockFocused);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // Home lands on the dock, not wherever in the grid you were.
+        lastFocused = lastDockFocused;
+        if (hasWindowFocus()) focusTile(lastDockFocused);
     }
 
     // ---- glass highlight -------------------------------------------------------------------------
@@ -374,6 +440,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     public void onTileFocused(int position, View card) {
         lastFocused = position;
+        if (position < COLUMNS) lastDockFocused = position;
+        setDockParked(position < COLUMNS);
         Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
         float pad = 6f * density;
@@ -428,7 +496,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int color = adapter.ambientColorAt(position);
         float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
-        float heroAlpha = y >= heroMinY() ? 1f : 0f;
+        float heroAlpha = shelfHasItems() ? 0f : 1f;
 
         if (!heroShown) {
             heroName.setText(label);
@@ -457,18 +525,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
     }
 
-    /** The hero name must stay below the category tabs (and the shelf above them). */
-    private float heroMinY() {
-        View cats = findViewById(R.id.layoutCategories);
-        Rect r = new Rect(0, 0, cats.getWidth(), cats.getHeight());
-        root.offsetDescendantRectToMyCoords(cats, r);
-        return r.bottom + 8 * density;
-    }
-
     private void setAmbient(int color) {
         ambientColor = color;
         int c = color & 0x00FFFFFF;
-        ambientGlow.setColors(new int[]{0x5C000000 | c, 0x26000000 | c, 0x00000000 | c});
+        ambientGlow.setColors(new int[]{0x3D000000 | c, 0x1A000000 | c, 0x00000000 | c});
     }
 
     private void hideHero() {
@@ -605,16 +665,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         popup.setOutsideTouchable(true);
         popup.setElevation(24f * density);
 
-        TextView bridgeInfo = dialog.findViewById(R.id.bridgeInfo);
-        String ip = getDeviceIpAddress();
-        bridgeInfo.setText("Web Bridge: http://" + ip + ":" + VibeBridgeServer.PORT + "\nОткройте в браузере телефона/ПК для передачи видео");
+        // VibeBridge can't listen yet (the launcher has no INTERNET permission), so don't advertise its address.
+        dialog.findViewById(R.id.bridgeInfo).setVisibility(View.GONE);
 
         // RAM Clean Row
         TextView lblRamClean = dialog.findViewById(R.id.lblRamClean);
-        lblRamClean.setText("Очистить оперативную память (" + btnRam.getText() + ")");
+        lblRamClean.setText("Очистить оперативную память (" + freeRamText() + ")");
         dialog.findViewById(R.id.rowRamClean).setOnClickListener(v -> {
             cleanRam();
-            lblRamClean.setText("Память очищена! " + btnRam.getText());
+            lblRamClean.setText("Память очищена! " + freeRamText());
         });
 
         // Watch Next Toggle Row
@@ -622,6 +681,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         lblToggle.setText("Полка «Продолжить просмотр»: " + (showWatchNext ? "Вкл" : "Выкл"));
         dialog.findViewById(R.id.rowToggleWatchNext).setOnClickListener(v -> {
             showWatchNext = !showWatchNext;
+            uiPrefs.edit().putBoolean("show_watch_next", showWatchNext).apply();
             refreshWatchNext();
             lblToggle.setText("Полка «Продолжить просмотр»: " + (showWatchNext ? "Вкл" : "Выкл"));
         });
@@ -656,18 +716,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         popup.showAtLocation(root, Gravity.CENTER, 0, 0);
         dialog.findViewById(R.id.rowRamClean).requestFocus();
-    }
-
-    private String getDeviceIpAddress() {
-        try {
-            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
-            if (wm != null) {
-                int ip = wm.getConnectionInfo().getIpAddress();
-                return Formatter.formatIpAddress(ip);
-            }
-        } catch (Exception ignored) {
-        }
-        return "192.168.1.155";
     }
 
     private void addMenuRow(LinearLayout rows, PopupWindow popup, int iconRes, String title, Runnable action) {

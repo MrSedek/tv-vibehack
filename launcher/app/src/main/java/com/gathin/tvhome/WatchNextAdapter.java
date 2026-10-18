@@ -223,10 +223,10 @@ public class WatchNextAdapter extends RecyclerView.Adapter<WatchNextAdapter.Hold
             card.setClipToOutline(true);
 
             card.setOnFocusChangeListener((view, focused) -> {
-                // Grow to the right, into the gap to the next card: growing left, the first card is cut
-                // off at the column's edge.
+                // Grow right and down, into the gap to the next card and the list's spare height: growing
+                // from the centre, the first card is cut off at the column's edge and the top.
                 view.setPivotX(0f);
-                view.setPivotY(view.getHeight() / 2f);
+                view.setPivotY(0f);
                 float s = focused ? 1.08f : 1.0f;
                 view.animate().scaleX(s).scaleY(s)
                         .setDuration(focused ? 240 : 160)

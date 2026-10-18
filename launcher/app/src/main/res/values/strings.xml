@@ -4,6 +4,7 @@
     <string name="inputs">Inputs</string>
     <string name="wifi">Wi-Fi</string>
     <string name="settings">Settings</string>
+    <string name="search">Search</string>
     <string name="choose_input">Inputs</string>
     <string name="connected">Connected</string>
     <string name="standby">Standby</string>
@@ -30,7 +31,13 @@
     <string name="unhide">Unhide</string>
     <string name="cant_open">Can\'t open</string>
 
+    <!-- Category tabs -->
+    <string name="tab_all">All</string>
+    <string name="tab_media">Movies and TV</string>
+    <string name="tab_tools">Tools</string>
+
     <!-- Continue watching shelf -->
+    <string name="continue_watching">Continue watching</string>
     <string name="resume_from">Resume from %1$s</string>
     <string name="remove_from_shelf">Remove from Continue Watching</string>
 </resources>
